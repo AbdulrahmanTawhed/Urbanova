@@ -58,4 +58,12 @@ Environmental analysis (`IEnvironmentalAnalysisEngine`, HeatV01), comparison
 ## Migration
 `PrdV02_EvidenceAndQuantity`: `RecommendationRules` (+ seed), FK
 `Recommendations.RecommendationRuleId` (Restrict), `CostEstimates.QuantitySource`
+`PrdV02_BackfillRuleLinks`: backfills pre-v0.2 rows (Calculated → `HEAT-VEG-001`,
+Estimated → `HEAT-PREVENT-001`; anything else stays NULL = pre-evidence, best-effort Down)
+
+## Follow-up review fixes (same branch)
+- `POST /api/scenarios/{id}/analyze` maps stale-param codes to 400 (was 500).
+- Quantity derivation accepts `m2`, `m²`, `m^2`, `sqm`.
+- `ScenarioParameterOptions` validated at startup (duplicates, blank keys,
+  inverted bands, negative cap fail fast instead of per-request 500s).
 (default `UserProvided`). No old migration touched.

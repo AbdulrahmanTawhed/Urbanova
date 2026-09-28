@@ -192,6 +192,32 @@ public sealed class CostTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Create_UnicodeUnit_DerivesQuantity()
+    {
+        var (client, projectId) = await SetupAsync();
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{projectId}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+        var recs = await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations");
+        var rec = recs.Should().ContainSingle().Subject;
+
+        // "m²" spelling must behave like "m2" (docs use both).
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(null, "m²", 8.50m, null, null, rec.Id, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = (await res.Content.ReadFromJsonAsync<CostEstimateResponse>())!;
+        body.Quantity.Should().Be(4m);
+        body.QuantitySource.Should().Be("DerivedFromGeometry");
+    }
+
+    [Fact]
     public async Task Create_NullQuantity_WithoutRecommendation_Returns400()
     {
         var (client, projectId) = await SetupAsync();

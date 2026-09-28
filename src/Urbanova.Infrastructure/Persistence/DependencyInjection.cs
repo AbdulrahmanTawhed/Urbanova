@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Urbanova.Application.Analysis;
 using Urbanova.Application.Comparison;
 using Urbanova.Application.Costing;
@@ -65,6 +66,8 @@ public static class DependencyInjection
         services.AddScoped<IAnalysisService, AnalysisService>();
         // Phase 8: scenarios (validators live beside the service; Api registers them explicitly).
         services.Configure<ScenarioParameterOptions>(config.GetSection(ScenarioParameterOptions.SectionName));
+        services.AddSingleton<IValidateOptions<ScenarioParameterOptions>, ScenarioParameterOptionsValidator>();
+        services.AddOptions<ScenarioParameterOptions>().ValidateOnStart();
         services.AddScoped<ScenarioParameterCatalog>();
         services.AddScoped<IScenarioService, ScenarioService>();
         // Phase 9: comparison (methodology swappable via IScenarioComparisonService).

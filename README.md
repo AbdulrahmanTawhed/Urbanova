@@ -43,7 +43,7 @@ Project → File → Validation → Geometry → Analysis → Baseline/Alternati
 Modify → Recalculate → Compare → Recommend → Cost → Report.
 
 > Status: **PRD v0.2 compliant** — configurable scenario catalog, evidence-backed
-> recommendations, traceable quantities; 213/213 tests green. See `docs/prd-v0.2.md`.
+> recommendations, traceable quantities; 219/219 tests green. See `docs/prd-v0.2.md`.
 > Every unresolved PRD requirement maps to an abstraction + configurable MVP
 > default documented in `docs/assumptions.md` (nothing hard-coded as final).
 

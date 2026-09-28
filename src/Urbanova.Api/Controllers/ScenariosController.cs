@@ -122,6 +122,11 @@ public sealed class ScenariosController(
                 "INVALID_FILE" or "GEOMETRY_EXTRACTION_FAILED" => StatusCode(
                     StatusCodes.Status422UnprocessableEntity,
                     ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status422UnprocessableEntity)),
+                // Stored scenario params can go stale relative to config (key disallowed,
+                // band narrowed, cap lowered) — report as bad input, mirroring AnalysisController.
+                "INVALID_SCENARIO_PARAMETER" or "UNSUPPORTED_SCENARIO_PARAMETER"
+                    or "TOO_MANY_SCENARIO_PARAMETERS" => BadRequest(
+                    ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status400BadRequest)),
                 _ => StatusCode(
                     StatusCodes.Status500InternalServerError,
                     ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status500InternalServerError)),

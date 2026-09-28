@@ -152,7 +152,7 @@ public sealed class CostService(
 
         if (recommendation is not null
             && recommendation.AnalysisRunId is not null
-            && request.Unit.Trim().Equals("m2", StringComparison.OrdinalIgnoreCase))
+            && IsSquareMetres(request.Unit))
         {
             var run = await db.AnalysisRuns
                 .Include(r => r.Result)
@@ -163,8 +163,15 @@ public sealed class CostService(
         }
 
         throw CostException.Invalid(
-            "Quantity is required. Omit it only with a RecommendationId for area-based (m2) " +
-            "interventions backed by analyzed geometry.");
+            "Quantity is required. Omit it only with a RecommendationId for area-based " +
+            "interventions (unit m2, m², m^2 or sqm) backed by analyzed geometry.");
+    }
+
+    /// <summary>Area-unit spellings accepted for geometry-derived quantities.</summary>
+    private static bool IsSquareMetres(string unit)
+    {
+        var u = unit.Trim().ToLowerInvariant();
+        return u is "m2" or "m²" or "m^2" or "sqm";
     }
 
     private static double? FindPolygonArea(string valuesJson, int polygonIndex)

@@ -231,6 +231,33 @@ public sealed class ScenariosTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Analyze_StaleStoredParams_Returns400_Not500()
+    {
+        // Stored params can go stale relative to config (key disallowed after the fact).
+        var client = await RegisterAsync();
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("Stale", null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+        Guid scenarioId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var scenario = new Urbanova.Domain.Entities.Scenario
+            {
+                ProjectId = project.Id, Kind = Urbanova.Domain.ScenarioKind.Alternative,
+                Name = "Stale", ParametersJson = """{"retired_param": 1}""",
+            };
+            db.Scenarios.Add(scenario);
+            await db.SaveChangesAsync();
+            scenarioId = scenario.Id;
+        }
+
+        var res = await client.PostAsJsonAsync($"/api/scenarios/{scenarioId}/analyze",
+            new AnalyzeScenarioRequest(null));
+        res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("UNSUPPORTED_SCENARIO_PARAMETER");
+    }
+
+    [Fact]
     public async Task Update_UnsupportedParameter_Returns400()
     {
         var client = await RegisterAsync();

@@ -99,3 +99,52 @@ public sealed class ScenarioParameterCatalogTests
             .Where(e => e.ErrorCode == "INVALID_SCENARIO_PARAMETER");
     }
 }
+
+/// <summary>Startup validation for the parameter catalog itself.</summary>
+public sealed class ScenarioParameterOptionsValidatorTests
+{
+    private static ValidateOptionsResult Check(ScenarioParameterOptions options) =>
+        new ScenarioParameterOptionsValidator().Validate(null, options);
+
+    [Fact]
+    public void ValidCatalog_Passes()
+    {
+        Check(new ScenarioParameterOptions
+        {
+            MaxParameters = 3,
+            Parameters = [new() { Key = "a", Name = "A", Unit = "%", Min = 0, Max = 100, Allowed = true }],
+        }).Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DuplicateKeys_Fail()
+    {
+        Check(new ScenarioParameterOptions
+        {
+            Parameters =
+            [
+                new() { Key = "a", Name = "A", Unit = "%", Min = 0, Max = 1 },
+                new() { Key = "a", Name = "A2", Unit = "%", Min = 0, Max = 1 },
+            ],
+        }).Succeeded.Should().BeFalse();
+    }
+
+    [Fact]
+    public void InvertedBand_AndNegativeCap_Fail()
+    {
+        Check(new ScenarioParameterOptions
+        {
+            MaxParameters = -1,
+            Parameters = [new() { Key = "a", Name = "A", Unit = "%", Min = 10, Max = 1 }],
+        }).Succeeded.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BlankKey_Fails()
+    {
+        Check(new ScenarioParameterOptions
+        {
+            Parameters = [new() { Key = " ", Name = "A", Unit = "%", Min = 0, Max = 1 }],
+        }).Succeeded.Should().BeFalse();
+    }
+}
