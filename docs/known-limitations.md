@@ -6,6 +6,9 @@
 - Configurable 3-parameter scenario catalog (keys, bands, cap all temporary);
   canonical key names still open; no recommendation confidence model.
 - Placeholder price catalog (not market data); no regional/dynamic pricing.
+- No currency conversion: project reports refuse a combined total across multiple
+  currencies (Unavailable + reason, null total/currency); scenario comparison
+  retains its existing mixed-currency refusal.
 - JSON + HTML reports only (no PDF); owner-only auth (no roles).
 - Planar CRS-unit areas (deg²), not square meters; all values estimated, none validated.
 - Evidence-rule references are MVP placeholders; quantity derivation covers m²

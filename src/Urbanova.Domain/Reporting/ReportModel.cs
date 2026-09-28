@@ -68,8 +68,19 @@ public sealed record ReportRecommendationSection(
     string CostStatus,
     ReportRecommendationCost? Cost);
 
+/// <summary>
+/// Project-wide cost aggregate. A combined total is only reported when every
+/// Calculated estimate shares one normalized currency; mixed currencies or no
+/// Calculated estimates yield Status Unavailable with null total/currency
+/// (never a cross-currency sum, never a 0/USD fallback).
+/// </summary>
 public sealed record ReportCostSection(
-    int CalculatedCount, int UnavailableCount, decimal CalculatedTotal, string Currency);
+    int CalculatedCount,
+    int UnavailableCount,
+    string Status,
+    string? Reason,
+    decimal? CalculatedTotal,
+    string? Currency);
 
 public sealed record ReportModel(
     ReportProjectSection Project,

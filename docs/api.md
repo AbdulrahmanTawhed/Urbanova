@@ -101,6 +101,13 @@ Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
 | GET | `/api/reports/{id}` | 200 ReportResponse | 401/403/404 |
 | GET | `/api/reports/{id}/file` | 200 text/html download (HTML reports; JSON → 404) | 401/403/404 |
 
+Report `costs` is a project-wide aggregate over Calculated estimates:
+`{calculatedCount, unavailableCount, status, reason, calculatedTotal?, currency?}`.
+`status` is `Calculated` only when every Calculated estimate shares one currency
+(total + currency reported); mixed currencies or no Calculated estimates yield
+`Unavailable` with `reason` and null total/currency — never a cross-currency sum,
+never `0 USD`. No currency conversion exists in the MVP.
+
 ## System
 
 | Method | Route | Auth | Notes |

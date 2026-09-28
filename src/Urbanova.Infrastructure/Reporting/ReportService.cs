@@ -200,6 +200,9 @@ public sealed class ReportService(
 
         var estimates = await db.CostEstimates.Where(e => e.ProjectId == project.Id).ToListAsync(ct);
         var calculated = estimates.Where(e => e.Status == CostStatus.Calculated).ToList();
+        // Single currency-safe summary shared by ReportCostSection and the
+        // DecisionSummary below — one decision, no duplicated currency logic.
+        var costSummary = SummarizeCosts(estimates, calculated);
 
         var decision = new List<string>();
         var caveats = new List<string>
@@ -240,19 +243,23 @@ public sealed class ReportService(
         {
             decision.Add("No scenario comparison included (both scenarios need succeeded analyses).");
         }
-        if (calculated.Count > 0)
+        if (costSummary.Status == "Calculated")
         {
             decision.Add(
-                $"Estimated total (calculated): {calculated.Sum(e => e.Total)} " +
-                $"{calculated.First().Currency} across {calculated.Count} estimate(s); " +
-                $"{estimates.Count - calculated.Count} unavailable.");
+                $"Estimated total (calculated): {costSummary.CalculatedTotal} " +
+                $"{costSummary.Currency} across {costSummary.CalculatedCount} estimate(s); " +
+                $"{costSummary.UnavailableCount} unavailable.");
             if (calculated.Any(e => (e.PriceSource ?? "").Contains("placeholder", StringComparison.OrdinalIgnoreCase)
                 || (e.PriceSource ?? "").Contains("catalog", StringComparison.OrdinalIgnoreCase)))
                 caveats.Add("Catalog prices are placeholders, not market data.");
         }
-        else
+        else if (estimates.Count == 0)
         {
             decision.Add("No cost estimates recorded.");
+        }
+        else
+        {
+            decision.Add($"Estimated total unavailable: {costSummary.Reason}");
         }
 
         return new ReportModel(
@@ -300,10 +307,44 @@ public sealed class ReportService(
                     r.ScientificReferences, r.Feasibility, r.Confidence,
                     status, cost);
             })],
-            new ReportCostSection(calculated.Count, estimates.Count - calculated.Count,
-                calculated.Sum(e => e.Total),
-                calculated.Select(e => e.Currency).FirstOrDefault() ?? "USD"),
+            costSummary,
             decision, caveats);
+    }
+
+    /// <summary>
+    /// Project-wide cost aggregate over already-loaded estimates (no DB access).
+    /// Currency convention mirrors <c>ComparisonService.CostDeltaAsync</c>: trim,
+    /// upper-invariant, ordinal distinct; currencies named in reasons are sorted
+    /// ordinally so output never depends on database row order.
+    /// </summary>
+    private static ReportCostSection SummarizeCosts(
+        IReadOnlyList<CostEstimate> estimates, IReadOnlyList<CostEstimate> calculated)
+    {
+        if (calculated.Count == 0)
+            return new ReportCostSection(
+                0, estimates.Count, "Unavailable",
+                estimates.Count == 0
+                    ? "No cost estimates recorded."
+                    : "Estimates exist but none have reliable prices.",
+                null, null);
+
+        var currencies = calculated
+            .Select(e => (e.Currency ?? string.Empty).Trim().ToUpperInvariant())
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .ToList();
+        if (currencies.Count > 1)
+            return new ReportCostSection(
+                calculated.Count, estimates.Count - calculated.Count, "Unavailable",
+                $"A combined total is unavailable because estimates use multiple currencies " +
+                $"({string.Join(", ", currencies)}); refusing to sum.",
+                null, null);
+
+        return new ReportCostSection(
+            calculated.Count, estimates.Count - calculated.Count, "Calculated", null,
+            calculated.Sum(e => e.Total),
+            currencies.SingleOrDefault() ?? "USD");
     }
 
     private async Task<int> NextVersionAsync(Guid projectId, CancellationToken ct) =>
