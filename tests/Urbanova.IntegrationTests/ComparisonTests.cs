@@ -124,6 +124,7 @@ public sealed class ComparisonTests : IAsyncLifetime
         cmp.Environmental.ImprovedClassTransitions.Should().Be(1);
         cmp.Cost.Status.Should().Be("Unavailable");
         cmp.Feasibility.Status.Should().Be("Unavailable");
+        cmp.Feasibility.Reason.Should().NotBeNullOrWhiteSpace();
         cmp.Tradeoffs.Should().NotBeEmpty();
     }
 

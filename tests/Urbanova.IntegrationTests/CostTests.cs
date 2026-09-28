@@ -306,6 +306,11 @@ public sealed class CostTests : IAsyncLifetime
         cmp.Cost.BaselineTotal.Should().Be(100m);
         cmp.Cost.AlternativeTotal.Should().Be(60m);
         cmp.Cost.Delta.Should().Be(-40m);
+        // Calculated scenario costs must not upgrade feasibility: no methodology exists.
+        cmp.Feasibility.Status.Should().Be("Unavailable");
+        cmp.Feasibility.Reason.Should().NotBeNullOrWhiteSpace();
+        new[] { "Calculated", "Available", "High", "Medium", "Low" }.Should()
+            .NotContain(cmp.Feasibility.Status, "cost availability is not a feasibility verdict");
     }
 
     [Fact]

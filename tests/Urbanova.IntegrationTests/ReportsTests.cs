@@ -324,6 +324,8 @@ public sealed class ReportsTests : IAsyncLifetime
         reported.GetProperty("evidenceLevel").GetString().Should().Be("Estimated");
         reported.GetProperty("scientificReferences").GetArrayLength().Should().BeGreaterThan(0);
         reported.GetProperty("feasibility").GetString().Should().NotBeNullOrWhiteSpace();
+        reported.GetProperty("feasibility").GetString().Should().Be(rec.Feasibility,
+            "the report passes stored feasibility through without rewriting it from the cost");
 
         // Linked calculated estimate must surface — never the old hardcoded Unavailable.
         // Report regen wipes rec rows, so this also proves the pre-regen link snapshot.
@@ -333,6 +335,13 @@ public sealed class ReportsTests : IAsyncLifetime
         detail.GetProperty("currency").GetString().Should().Be("USD");
         detail.GetProperty("quantitySource").GetString().Should().Be("UserProvided");
         detail.GetProperty("priceSource").GetString().Should().Be("user-provided");
+
+        // DecisionSummary stays neutral: no feasibility verdict, no winner language.
+        var summary = doc.RootElement.GetProperty("decisionSummary")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+        summary.Should().OnlyContain(s => !s!.ToLowerInvariant().Contains("feasib"));
+        summary.Should().OnlyContain(s =>
+            !s!.Contains("winner") && !s.Contains("best scenario") && !s.Contains("affordable"));
     }
 
     [Fact]

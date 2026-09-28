@@ -77,6 +77,10 @@ Areas are planar CRS units (`deg²` for EPSG:4326) — not m².
 
 Cost dimension fills from scenario-linked Calculated estimates, else Unavailable.
 
+Feasibility dimension stays Unavailable (`No feasibility data linked to these scenarios yet`):
+no comparison-feasibility methodology exists, and calculated scenario costs alone
+do not create a feasibility verdict.
+
 ## Recommendations
 
 | Method | Route | Success | Errors |
@@ -84,6 +88,12 @@ Cost dimension fills from scenario-linked Calculated estimates, else Unavailable
 | GET | `/api/projects/{id}/recommendations?runId=` (default: latest succeeded run) | 200 RecommendationResponse[] `{problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility, confidence: null, scientificReferences[], cost: Unavailable}` | 400 no analysis, 401/403/404, 422 NO_EVIDENCE (rule unknown/inactive; nothing stored) |
 
 Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
+
+Feasibility is a heuristic recommendation-level string (High/Medium/Low bands on
+intervention magnitude under the current vegetation rule), not a validated
+engineering verdict: not technical feasibility, affordability, or constructability.
+It is persisted at generation and is independent of any later linked CostEstimate
+status; `confidence` remains null and `EvidenceLevel` does not validate it.
 
 ## Cost Estimates
 

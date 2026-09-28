@@ -281,7 +281,7 @@ Response: 201/200 AnalysisRunResponse / 400 stale params / 422
 ```text
 GET   /api/projects/{projectId}/comparison?baselineId={id}&alternativeId={id}
 Purpose: baseline-vs-alternative deltas, transitions, cost totals, trade-offs   Authentication: JWT
-Response: 200 ComparisonResponse (cost dimension `Unavailable` on mixed currencies) / 400 (unanalyzed, kind mismatch, geometry mismatch) / 403 / 404
+Response: 200 ComparisonResponse (cost dimension `Unavailable` on mixed currencies; feasibility `Unavailable` — no comparison methodology; costs never imply feasibility) / 400 (unanalyzed, kind mismatch, geometry mismatch) / 403 / 404
 ```
 
 ### Recommendations — `RecommendationsController` (`api`)
@@ -289,7 +289,7 @@ Response: 200 ComparisonResponse (cost dimension `Unavailable` on mixed currenci
 ```text
 GET   /api/projects/{projectId}/recommendations?runId={id}
 Purpose: rule-based recs for a run (default: latest succeeded)   Authentication: JWT
-Response: 200 RecommendationResponse[] {problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility, confidence: null, scientificReferences[], cost: Unavailable} / 400 no analysis / 422 NO_EVIDENCE / 403 / 404
+Response: 200 RecommendationResponse[] {problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility (heuristic High/Medium/Low — not validated, cost-independent), confidence: null, scientificReferences[], cost: Unavailable} / 400 no analysis / 422 NO_EVIDENCE / 403 / 404
 ```
 
 ### Costing — `CostEstimatesController` (`api`)

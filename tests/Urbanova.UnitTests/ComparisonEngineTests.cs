@@ -38,6 +38,8 @@ public sealed class ComparisonEngineTests
         result.Tradeoffs.Should().Contain(t => t.Contains("improved by 4"));
         result.Cost.Status.Should().Be("Unavailable");
         result.Feasibility.Status.Should().Be("Unavailable");
+        result.Feasibility.Reason.Should().NotBeNullOrWhiteSpace()
+            .And.Contain("feasibility", "the refusal must explain the missing data or methodology");
     }
 
     [Fact]
