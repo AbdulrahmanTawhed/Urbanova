@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -327,5 +328,66 @@ public sealed class RecommendationsTests : IAsyncLifetime
             .StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await _anon.GetAsync($"/api/projects/{projectId}/recommendations"))
             .StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task UnknownRule_BlocksGeneration_WithNoEvidence_AndPersistsNothing()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        var an = await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, [])); // 32°C → Moderate → HEAT-PREVENT-001
+        an.StatusCode.Should().Be(HttpStatusCode.Created);
+        var runId = (await an.Content.ReadFromJsonAsync<AnalysisRunResponse>())!.RunId;
+
+        // Empty the registry through the database (no fake engine, no production
+        // change): the engine-emitted code is now absent, so rule resolution must
+        // block the whole set before writing anything.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.RecommendationRules.ExecuteDeleteAsync();
+        }
+
+        var res = await client.GetAsync($"/api/projects/{projectId}/recommendations?runId={runId}");
+        res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("code").GetString().Should().Be("NO_EVIDENCE");
+        doc.RootElement.GetProperty("detail").GetString().Should().Contain("HEAT-PREVENT-001");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Recommendations.CountAsync(r => r.ProjectId == projectId)).Should().Be(0);
+            (await db.Recommendations.CountAsync(r => r.AnalysisRunId == runId)).Should().Be(0,
+                "blocked generation stores nothing, not even a partial set");
+            var run = await db.AnalysisRuns.Include(r => r.Result).SingleAsync(r => r.Id == runId);
+            run.Status.Should().Be(Domain.AnalysisStatus.Succeeded);
+            run.Result.Should().NotBeNull("the failed recommendation read must not touch the run");
+        }
+    }
+
+    [Fact]
+    public async Task AcceptableRun_RepeatedRetrieval_ReturnsEmptyWithoutPersistence()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        var an = await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, new() { ["vegetationCoverPct"] = 100.0 })); // 27°C → Acceptable
+        an.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var first = await client.GetAsync($"/api/projects/{projectId}/recommendations");
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await first.Content.ReadFromJsonAsync<RecommendationResponse[]>())
+            .Should().BeEmpty();
+
+        var second = await client.GetAsync($"/api/projects/{projectId}/recommendations");
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await second.Content.ReadFromJsonAsync<RecommendationResponse[]>())
+            .Should().BeEmpty("repeated retrieval of an empty result stores nothing");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Recommendations.CountAsync(r => r.ProjectId == projectId)).Should().Be(0);
+        }
     }
 }

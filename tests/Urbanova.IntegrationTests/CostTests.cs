@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -327,5 +328,122 @@ public sealed class CostTests : IAsyncLifetime
         (await bob.GetAsync($"/api/cost-estimates/{estimate.Id}")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await alice.GetAsync($"/api/cost-estimates/{Guid.NewGuid()}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await _anon.GetAsync($"/api/cost-estimates/{estimate.Id}")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    private async Task<(HttpClient Client, Guid ProjectId, RecommendationResponse Rec)> SetupWithRecommendationAsync()
+    {
+        var (client, projectId) = await SetupAsync();
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{projectId}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+        var recs = await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations");
+        return (client, projectId, recs.Should().ContainSingle().Subject);
+    }
+
+    [Fact]
+    public async Task Create_SecondEstimate_ForLinkedRecommendation_Returns400_PreservesOriginal()
+    {
+        var (client, projectId, rec) = await SetupWithRecommendationAsync();
+
+        var first = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(100, "m2", 8.50m, null, "USD", rec.Id, null));
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+        var firstId = (await first.Content.ReadFromJsonAsync<CostEstimateResponse>())!.Id;
+
+        var second = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(50, "m2", 9.00m, null, "USD", rec.Id, null));
+        second.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var doc = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("code").GetString().Should().Be("INVALID_COST");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.CostEstimates.CountAsync(e => e.ProjectId == projectId)).Should().Be(1,
+                "the rejected second estimate persists nothing");
+            (await db.CostEstimates.CountAsync(e => e.RecommendationId == rec.Id)).Should().Be(1);
+            var row = await db.Recommendations.SingleAsync(r => r.Id == rec.Id);
+            row.CostEstimateId.Should().Be(firstId, "the original link must survive the rejected write");
+            (await db.CostEstimates.SingleAsync(e => e.Id == firstId)).RecommendationId.Should().Be(rec.Id);
+        }
+
+        var again = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!.Should().ContainSingle().Subject;
+        again.Cost.Status.Should().Be("Calculated", "the first estimate remains the truthful linked cost");
+    }
+
+    [Fact]
+    public async Task Create_WithForeignProjectRecommendationId_Returns404_PersistsNothing()
+    {
+        var (client, projectA, recA) = await SetupWithRecommendationAsync();
+        var prB = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("CostB", null, null));
+        var projectB = (await prB.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectB.Id}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 10m, null, "USD", recA.Id, null));
+        res.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        // Framework-default 404 problem carries no code/detail/ids: nothing reveals
+        // whether the foreign recommendation exists or who owns it.
+        var body = await res.Content.ReadAsStringAsync();
+        body.Should().Contain("\"status\":404")
+            .And.NotContain("\"code\"")
+            .And.NotContain("\"detail\"")
+            .And.NotContain("foreign")
+            .And.NotContain(recA.Id.ToString());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.CostEstimates.CountAsync(e => e.ProjectId == projectB.Id)).Should().Be(0);
+            (await db.CostEstimates.CountAsync(e => e.RecommendationId == recA.Id)).Should().Be(0);
+            var row = await db.Recommendations.SingleAsync(r => r.Id == recA.Id);
+            row.CostEstimateId.Should().BeNull("the foreign write must not touch Project A's recommendation");
+            row.ProjectId.Should().Be(projectA);
+        }
+    }
+
+    [Fact]
+    public async Task Create_WithForeignProjectScenarioId_Returns404_PersistsNothing()
+    {
+        var (client, projectA) = await SetupAsync();
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{projectA}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        var an = await client.PostAsJsonAsync($"/api/projects/{projectA}/analysis",
+            new AnalyzeRequest(file.Id, []));
+        var run = (await an.Content.ReadFromJsonAsync<AnalysisRunResponse>())!;
+
+        var bl = await client.PostAsJsonAsync($"/api/projects/{projectA}/scenarios",
+            new CreateScenarioRequest("Baseline", run.RunId, null, null));
+        var baseline = (await bl.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+
+        var prB = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("CostB", null, null));
+        var projectB = (await prB.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectB.Id}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 10m, null, null, null, baseline.Id));
+        res.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.CostEstimates.CountAsync(e => e.ProjectId == projectB.Id)).Should().Be(0);
+            (await db.CostEstimates.CountAsync(e => e.ScenarioId == baseline.Id)).Should().Be(0,
+                "no estimate may link to the foreign scenario");
+            var row = await db.Scenarios.SingleAsync(s => s.Id == baseline.Id);
+            row.Name.Should().Be("Baseline");
+            row.ProjectId.Should().Be(projectA, "the foreign scenario remains unchanged");
+        }
     }
 }
