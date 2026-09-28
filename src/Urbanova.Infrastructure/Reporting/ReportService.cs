@@ -169,10 +169,25 @@ public sealed class ReportService(
         }
 
         // Recommendations resolve through the idempotent service, so reports never
-        // silently omit them when the endpoint was not called first.
+        // silently omit them when the endpoint was not called first. Retrieval is
+        // non-destructive (stable rows per immutable run), therefore cost links are
+        // read from persisted Recommendation→CostEstimate rows keyed by real id —
+        // one batched query, no per-recommendation round-trips, project-scoped.
         var recRows = run is null
             ? []
             : await recommendations.GetForProjectAsync(ownerId, project.Id, run.Id, ct);
+        Dictionary<Guid, CostEstimate?> costByRecId = new();
+        if (recRows.Count > 0)
+        {
+            var recIds = recRows.Select(r => r.Id).ToList();
+            var linked = await db.Recommendations
+                .Where(r => r.ProjectId == project.Id && recIds.Contains(r.Id))
+                .Include(r => r.CostEstimate)
+                .AsNoTracking()
+                .ToListAsync(ct);
+            foreach (var row in linked)
+                costByRecId[row.Id] = row.CostEstimate;
+        }
         var recByPolygon = recRows
             .GroupBy(r => r.PolygonIndex)
             .ToDictionary(g => g.Key, g => g.First().Intervention);
@@ -266,9 +281,25 @@ public sealed class ReportService(
                     comparisonResult.Environmental.WorsenedCount,
                     comparisonResult.Cost.Status == "Calculated" ? comparisonResult.Cost.Delta : null,
                     comparisonResult.Cost.Currency),
-            [.. recRows.Select(r => new ReportRecommendationSection(
-                r.PolygonIndex, r.Problem, r.Intervention, r.EvidenceLevel,
-                r.Feasibility, r.Confidence, "Unavailable"))],
+            [.. recRows.OrderBy(r => r.PolygonIndex).Select(r =>
+            {
+                // Real linked status from the stable persisted relationship. Unlinked
+                // stays Unavailable; non-Calculated links expose their real status with
+                // no detail row (a stored Total of 0 must never read as confirmed price).
+                costByRecId.TryGetValue(r.Id, out var estimate);
+                var status = estimate?.Status.ToString() ?? "Unavailable";
+                ReportRecommendationCost? cost = estimate is { Status: CostStatus.Calculated }
+                    ? new ReportRecommendationCost(
+                        estimate.Status.ToString(), estimate.Total, estimate.Currency,
+                        estimate.Quantity, estimate.QuantitySource, estimate.Unit,
+                        estimate.UnitPrice, estimate.PriceSource)
+                    : null;
+                return new ReportRecommendationSection(
+                    r.PolygonIndex, r.Problem, r.Cause, r.Intervention, r.ExpectedImpact,
+                    r.RuleCode, r.EvidenceSource, r.EvidenceLevel,
+                    r.ScientificReferences, r.Feasibility, r.Confidence,
+                    status, cost);
+            })],
             new ReportCostSection(calculated.Count, estimates.Count - calculated.Count,
                 calculated.Sum(e => e.Total),
                 calculated.Select(e => e.Currency).FirstOrDefault() ?? "USD"),

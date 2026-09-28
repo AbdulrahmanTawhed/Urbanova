@@ -1,5 +1,7 @@
 namespace Urbanova.Domain.Reporting;
 
+using System.Text.Json;
+
 /// <summary>
 /// Canonical report model (PRD §15). Both generators render THIS — adding a future
 /// format (PDF, …) means one new IReportGenerator, zero model changes.
@@ -35,9 +37,36 @@ public sealed record ReportComparisonSection(
     double? MeanDelta, int? ImprovedCount, int? WorsenedCount,
     decimal? CostDelta, string? CostCurrency);
 
+/// <summary>
+/// Small linked-cost projection for one recommendation: only fields already stored
+/// by <c>CostEstimate</c>. Present only when a valid linked estimate exists and is
+/// Calculated; otherwise null and <see cref="ReportRecommendationSection.CostStatus"/>
+/// stays Unavailable (never a fabricated zero).
+/// </summary>
+public sealed record ReportRecommendationCost(
+    string Status,
+    decimal? Total,
+    string? Currency,
+    decimal? Quantity,
+    string? QuantitySource,
+    string? Unit,
+    decimal? UnitPrice,
+    string? PriceSource);
+
 public sealed record ReportRecommendationSection(
-    int PolygonIndex, string Problem, string Intervention,
-    string EvidenceLevel, string? Feasibility, double? Confidence, string CostStatus);
+    int PolygonIndex,
+    string Problem,
+    string Cause,
+    string Intervention,
+    JsonElement? ExpectedImpact,
+    string? RuleCode,
+    string? EvidenceSource,
+    string EvidenceLevel,
+    IReadOnlyList<string> ScientificReferences,
+    string? Feasibility,
+    double? Confidence,
+    string CostStatus,
+    ReportRecommendationCost? Cost);
 
 public sealed record ReportCostSection(
     int CalculatedCount, int UnavailableCount, decimal CalculatedTotal, string Currency);
