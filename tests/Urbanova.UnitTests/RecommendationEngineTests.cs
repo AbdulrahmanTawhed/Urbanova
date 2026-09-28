@@ -32,6 +32,8 @@ public sealed class RecommendationEngineTests
         rec.ExpectedImpact.PredictedDeltaC.Should().BeApproximately(-1.05, 1e-9);
         rec.ExpectedImpact.TargetClassification.Should().Be(nameof(ProblemClass.Moderate));
         rec.Feasibility.Should().Contain("Medium");
+        rec.Feasibility.Should().Contain("heuristic").And.Contain("+21%",
+            "the band result must carry its explicit vegetation-magnitude basis");
         rec.EvidenceSource.Should().Contain("HeatV01");
     }
 
@@ -43,6 +45,8 @@ public sealed class RecommendationEngineTests
         var rec = recs.Should().ContainSingle().Subject;
         rec.EvidenceLevel.Should().Be(EvidenceLevel.Estimated);
         rec.Confidence.Should().BeNull();
+        rec.Feasibility.Should().Contain("High").And.Contain("no construction",
+            "preventive advice keeps its existing no-construction rationale");
         rec.Intervention.Should().Contain("Maintain");
     }
 

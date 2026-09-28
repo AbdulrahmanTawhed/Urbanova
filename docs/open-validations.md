@@ -11,6 +11,11 @@
 9. Report format
 10. User roles
 11. Analysis validation method
+12. Feasibility methodology (approved definition; whether technical feasibility,
+    affordability, and implementation readiness are separate dimensions; inputs,
+    threshold validation, aggregation across polygons/recommendations,
+    missing-cost and mixed-currency behavior; engineering sign-off required
+    before comparison-level feasibility is computed)
 
 Each maps to an abstraction + configurable MVP default in `assumptions.md`.
 Nothing in `src/` treats these defaults as final.

@@ -390,4 +390,37 @@ public sealed class RecommendationsTests : IAsyncLifetime
             (await db.Recommendations.CountAsync(r => r.ProjectId == projectId)).Should().Be(0);
         }
     }
+
+    [Fact]
+    public async Task LinkedCost_DoesNotReclassifyStoredFeasibility()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var before = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!.Should().ContainSingle().Subject;
+        before.Cost.Status.Should().Be("Unavailable");
+        before.Feasibility.Should().NotBeNullOrWhiteSpace();
+
+        var cost = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(100, "m2", 8.50m, null, "USD", before.Id, null));
+        cost.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var after = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!.Should().ContainSingle().Subject;
+        after.Id.Should().Be(before.Id, "linking a cost must not duplicate the recommendation");
+        after.Feasibility.Should().Be(before.Feasibility, "stored feasibility is cost-independent");
+        after.Cost.Status.Should().Be("Calculated");
+        after.Feasibility.Should().NotContain("afford")
+            .And.NotContain("Validat", "a linked price adds no affordability or validation wording");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Recommendations.CountAsync(r => r.ProjectId == projectId)).Should().Be(1);
+            (await db.Recommendations.SingleAsync(r => r.Id == before.Id))
+                .Feasibility.Should().Be(before.Feasibility);
+        }
+    }
 }

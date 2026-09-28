@@ -16,6 +16,7 @@ where it surfaces in analysis output.
 | 8 | Cost source | `AppData/pricing/mvp-prices.json`; missing → `Unavailable` | Reliable price feed |
 | 12 | Evidence references | `RecommendationRules` seed cites MVP placeholder references | Real engineering rules + scientific sources |
 | 13 | Cost quantity | Omitted quantity derived from analyzed polygon area (m²) when backed by geometry | Validated quantity-takeoff rules |
+| 14 | Recommendation/comparison feasibility | Recommendation feasibility is an MVP heuristic (High/Medium/Low bands on intervention magnitude under the vegetation rule; temporary threshold edges); it is not validated technical, financial, regulatory, or construction feasibility and is independent of later cost estimates. Comparison feasibility stays Unavailable until a methodology is approved | Validated feasibility methodology |
 | 9 | Report format | JSON canonical + simple HTML renderer; no PDF | Defined format |
 | 10 | User roles | Owner-only; `Role` claim parsed but unenforced | Final RBAC |
 | 11 | Analysis validation | Deterministic re-run (`InputHash` match); external = `PendingValidation` | Validation protocol |
