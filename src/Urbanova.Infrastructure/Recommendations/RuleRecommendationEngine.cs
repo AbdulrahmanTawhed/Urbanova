@@ -17,6 +17,11 @@ public sealed class RuleRecommendationEngine(
     IOptions<HeatAnalysisOptions> heatOptions,
     IOptions<ClassificationOptions> classOptions) : IRecommendationEngine
 {
+    /// <summary>Rule codes cited by this engine; must exist and be active in the registry.</summary>
+    public const string VegetationRuleCode = "HEAT-VEG-001";
+
+    public const string PreventiveRuleCode = "HEAT-PREVENT-001";
+
     private readonly HeatAnalysisOptions _heat = heatOptions.Value;
     private readonly ClassificationOptions _classes = classOptions.Value;
 
@@ -64,6 +69,7 @@ public sealed class RuleRecommendationEngine(
                 Math.Round(predicted - area.Value, 2),
                 predicted < _classes.ModerateBelow ? nameof(ProblemClass.Moderate) : nameof(ProblemClass.ProblemArea),
                 $"HeatV01 sensitivity: −{_heat.VegCoolingPerPct} {_heat.Unit} per vegetation %."),
+            VegetationRuleCode,
             source,
             EvidenceLevel.Calculated,
             $"{feasibility} (heuristic: +{needed}% vegetation needed).",
@@ -79,6 +85,7 @@ public sealed class RuleRecommendationEngine(
             $"Maintain at least {currentVeg}% vegetation cover in area {area.PolygonIndex} and monitor; " +
             "expand cover if surrounding development intensifies.",
             new ExpectedImpact(0, nameof(ProblemClass.Moderate), "Preventive — no change modeled."),
+            PreventiveRuleCode,
             source,
             EvidenceLevel.Estimated,
             "High (no construction required).",

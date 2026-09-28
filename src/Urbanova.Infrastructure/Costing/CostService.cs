@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Urbanova.Application.Costing;
@@ -62,12 +63,17 @@ public sealed class CostService(
                 throw CostException.NotFound(request.ScenarioId.Value);
         }
 
+        // PRD v0.2 §18: quantity is traceable — user-provided, or derived from the
+        // recommendation's analyzed polygon area for area-based (m²) interventions.
+        // Anything else is rejected rather than invented.
+        var (quantity, quantitySource) = await ResolveQuantityAsync(request, recommendation, ct);
         var estimate = new CostEstimate
         {
             ProjectId = projectId,
             RecommendationId = request.RecommendationId,
             ScenarioId = request.ScenarioId,
-            Quantity = request.Quantity,
+            Quantity = quantity,
+            QuantitySource = quantitySource,
             Unit = request.Unit.Trim(),
             Currency = string.IsNullOrWhiteSpace(request.Currency) ? "USD" : request.Currency!.Trim().ToUpperInvariant(),
             CreatedBy = ownerId,
@@ -138,8 +144,54 @@ public sealed class CostService(
         return ToResponse(row);
     }
 
+    private async Task<(decimal Quantity, string Source)> ResolveQuantityAsync(
+        CreateCostEstimateRequest request, Recommendation? recommendation, CancellationToken ct)
+    {
+        if (request.Quantity is not null)
+            return (request.Quantity.Value, "UserProvided");
+
+        if (recommendation is not null
+            && recommendation.AnalysisRunId is not null
+            && request.Unit.Trim().Equals("m2", StringComparison.OrdinalIgnoreCase))
+        {
+            var run = await db.AnalysisRuns
+                .Include(r => r.Result)
+                .SingleOrDefaultAsync(r => r.Id == recommendation.AnalysisRunId, ct);
+            var area = run?.Result is null ? null : FindPolygonArea(run.Result.ValuesJson, recommendation.PolygonIndex);
+            if (area is not null)
+                return ((decimal)Math.Round(area.Value, 4), "DerivedFromGeometry");
+        }
+
+        throw CostException.Invalid(
+            "Quantity is required. Omit it only with a RecommendationId for area-based (m2) " +
+            "interventions backed by analyzed geometry.");
+    }
+
+    private static double? FindPolygonArea(string valuesJson, int polygonIndex)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(valuesJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return null;
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.TryGetProperty("polygonIndex", out var idx)
+                    && idx.GetInt32() == polygonIndex
+                    && el.TryGetProperty("area", out var area)
+                    && area.ValueKind == JsonValueKind.Number)
+                    return area.GetDouble();
+            }
+        }
+        catch (JsonException)
+        {
+            // Corrupt values → not derivable; caller rejects instead of inventing.
+        }
+        return null;
+    }
+
     private static CostEstimateResponse ToResponse(CostEstimate e) => new(
         e.Id, e.ProjectId, e.RecommendationId, e.ScenarioId,
-        e.Quantity, e.Unit, e.UnitPrice, e.Currency, e.PriceSource,
+        e.Quantity, e.QuantitySource, e.Unit, e.UnitPrice, e.Currency, e.PriceSource,
         e.Total, e.Status.ToString(), e.CreatedAt);
 }

@@ -20,6 +20,7 @@ public sealed class ScenarioService(
     AppDbContext db,
     IValidator<CreateScenarioRequest> createValidator,
     IValidator<UpdateScenarioRequest> updateValidator,
+    ScenarioParameterCatalog parameterCatalog,
     IAnalysisService analysis) : IScenarioService
 {
     public async Task<ScenarioResponse> CreateAsync(
@@ -89,6 +90,10 @@ public sealed class ScenarioService(
             scenario.BaseAnalysisRunId = baseRunId ?? parent.BaseAnalysisRunId;
         }
 
+        // Coded catalog validation on the final merged set (run + request params).
+        parameterCatalog.Validate(
+            JsonSerializer.Deserialize<Dictionary<string, double>>(scenario.ParametersJson) ?? []);
+
         db.Scenarios.Add(scenario);
         await db.SaveChangesAsync(ct);
         return await LoadAsync(scenario.Id, ct);
@@ -141,8 +146,12 @@ public sealed class ScenarioService(
             scenario.Name = request.Name.Trim();
         }
         if (request.Parameters is not null)
+        {
+            parameterCatalog.Validate(
+                new Dictionary<string, double>(request.Parameters, StringComparer.Ordinal));
             scenario.ParametersJson = JsonSerializer.Serialize(
                 new SortedDictionary<string, double>(request.Parameters, StringComparer.Ordinal));
+        }
         scenario.Version++;
 
         try

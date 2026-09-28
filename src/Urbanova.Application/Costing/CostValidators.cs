@@ -10,7 +10,8 @@ public sealed class CreateCostEstimateRequestValidator : AbstractValidator<Creat
 
     public CreateCostEstimateRequestValidator()
     {
-        RuleFor(x => x.Quantity).GreaterThanOrEqualTo(0).LessThanOrEqualTo(MaxAmount);
+        RuleFor(x => x.Quantity!.Value).GreaterThanOrEqualTo(0).LessThanOrEqualTo(MaxAmount)
+            .When(x => x.Quantity.HasValue);
         RuleFor(x => x.Unit).NotEmpty().MaximumLength(50);
         RuleFor(x => x.UnitPrice).GreaterThanOrEqualTo(0).LessThanOrEqualTo(MaxAmount)
             .When(x => x.UnitPrice.HasValue);

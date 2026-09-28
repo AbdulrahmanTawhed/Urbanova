@@ -210,6 +210,45 @@ public sealed class ScenariosTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Update_TooManyParameters_Returns400()
+    {
+        var client = await RegisterAsync();
+        var (projectId, _, _) = await SetupWithRunAsync(client);
+        var bl = await client.PostAsJsonAsync($"/api/projects/{projectId}/scenarios",
+            new CreateScenarioRequest("Baseline", null, null, null));
+        var baseline = (await bl.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+        var al = await client.PostAsJsonAsync($"/api/projects/{projectId}/scenarios",
+            new CreateScenarioRequest("Alt", null, baseline.Id, null));
+        var alt = (await al.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+
+        var res = await client.PutAsJsonAsync($"/api/scenarios/{alt.Id}",
+            new UpdateScenarioRequest(null, new()
+            {
+                ["vegetationCoverPct"] = 10, ["albedo"] = 0.5, ["shadingPct"] = 10, ["extra"] = 1,
+            }, alt.RowVersion));
+        res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("TOO_MANY_SCENARIO_PARAMETERS");
+    }
+
+    [Fact]
+    public async Task Update_UnsupportedParameter_Returns400()
+    {
+        var client = await RegisterAsync();
+        var (projectId, _, _) = await SetupWithRunAsync(client);
+        var bl = await client.PostAsJsonAsync($"/api/projects/{projectId}/scenarios",
+            new CreateScenarioRequest("Baseline", null, null, null));
+        var baseline = (await bl.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+        var al = await client.PostAsJsonAsync($"/api/projects/{projectId}/scenarios",
+            new CreateScenarioRequest("Alt", null, baseline.Id, null));
+        var alt = (await al.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+
+        var res = await client.PutAsJsonAsync($"/api/scenarios/{alt.Id}",
+            new UpdateScenarioRequest(null, new() { ["building_orientation"] = 45 }, alt.RowVersion));
+        res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("UNSUPPORTED_SCENARIO_PARAMETER");
+    }
+
+    [Fact]
     public async Task AnalyzeAlternative_UsesScenarioParams_Replay_IsIdempotent()
     {
         var client = await RegisterAsync();

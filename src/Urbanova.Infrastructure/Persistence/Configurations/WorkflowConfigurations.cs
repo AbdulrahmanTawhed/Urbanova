@@ -87,6 +87,59 @@ public sealed class RecommendationConfiguration : IEntityTypeConfiguration<Recom
             .HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.SetNull);
         b.HasOne(x => x.CostEstimate).WithMany()
             .HasForeignKey(x => x.CostEstimateId).OnDelete(DeleteBehavior.SetNull);
+        b.HasOne(x => x.RecommendationRule).WithMany(x => x.Recommendations)
+            .HasForeignKey(x => x.RecommendationRuleId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class RecommendationRuleConfiguration : IEntityTypeConfiguration<RecommendationRule>
+{
+    // Fixed ids so engine rule codes resolve deterministically across environments.
+    private static readonly Guid VegRuleId = Guid.Parse("b1e0f101-0000-4000-8000-000000000001");
+    private static readonly Guid PreventRuleId = Guid.Parse("b1e0f101-0000-4000-8000-000000000002");
+
+    public void Configure(EntityTypeBuilder<RecommendationRule> b)
+    {
+        b.ToTable("RecommendationRules");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Code).IsRequired().HasMaxLength(50);
+        b.HasIndex(x => x.Code).IsUnique();
+        b.Property(x => x.Title).IsRequired().HasMaxLength(300);
+        b.Property(x => x.Description).HasMaxLength(2000);
+        b.Property(x => x.ScientificReferencesJson).HasColumnType("nvarchar(max)");
+        b.Property(x => x.ImpactBasis).HasMaxLength(1000);
+        b.Property(x => x.EngineName).HasMaxLength(100);
+        b.Property(x => x.EngineVersion).HasMaxLength(50);
+        b.HasData(
+            new RecommendationRule
+            {
+                Id = VegRuleId,
+                Code = "HEAT-VEG-001",
+                Title = "Increase vegetation cover to exit the heat problem band",
+                Description = "Sizes a vegetation-cover increase from HeatV01 cooling sensitivities " +
+                    "so the modeled area value falls strictly below the Moderate band edge.",
+                ScientificReferencesJson = """["MVP placeholder reference — pending engineering validation"]""",
+                ImpactBasis = "HeatV01 per-percent vegetation cooling sensitivity (configured).",
+                EngineName = "HeatV01",
+                EngineVersion = "0.1.0-mvp",
+                IsActive = true,
+                CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                UpdatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            },
+            new RecommendationRule
+            {
+                Id = PreventRuleId,
+                Code = "HEAT-PREVENT-001",
+                Title = "Maintain vegetation cover in moderately warm areas",
+                Description = "Preventive guidance for areas in the moderate band: hold cover, monitor.",
+                ScientificReferencesJson = """["MVP placeholder reference — pending engineering validation"]""",
+                ImpactBasis = "Preventive — no change modeled.",
+                EngineName = "HeatV01",
+                EngineVersion = "0.1.0-mvp",
+                IsActive = true,
+                CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                UpdatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            });
     }
 }
 
@@ -97,6 +150,7 @@ public sealed class CostEstimateConfiguration : IEntityTypeConfiguration<CostEst
         b.ToTable("CostEstimates");
         b.HasKey(x => x.Id);
         b.Property(x => x.Quantity).HasPrecision(18, 4).IsRequired();
+        b.Property(x => x.QuantitySource).IsRequired().HasMaxLength(50).HasDefaultValue("UserProvided");
         b.Property(x => x.Unit).IsRequired().HasMaxLength(50);
         b.Property(x => x.UnitPrice).HasPrecision(18, 4).IsRequired();
         b.Property(x => x.Currency).IsRequired().HasMaxLength(3).HasDefaultValue("USD");

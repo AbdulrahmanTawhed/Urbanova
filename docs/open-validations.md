@@ -5,7 +5,7 @@
 3. Heat analysis units
 4. Heat thresholds
 5. Environmental classification rules
-6. Scenario parameters (modifiable set)
+6. Scenario parameters (modifiable set — v0.2: configurable catalog with 3 approved keys + bands + max count; canonical key names still open)
 7. Recommendation confidence model
 8. Cost data source
 9. Report format

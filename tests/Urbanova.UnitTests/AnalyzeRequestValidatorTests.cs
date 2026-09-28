@@ -3,7 +3,8 @@ using Urbanova.Application.Analysis;
 
 namespace Urbanova.UnitTests;
 
-/// <summary>Phase 7: analysis request validation (closed MVP parameter set).</summary>
+/// <summary>Analyze request shape validation. Parameter content moved to
+/// ScenarioParameterCatalog (PRD v0.2) — see ScenarioParameterCatalogTests.</summary>
 public sealed class AnalyzeRequestValidatorTests
 {
     private readonly AnalyzeRequestValidator _validator = new();
@@ -15,30 +16,18 @@ public sealed class AnalyzeRequestValidatorTests
     }
 
     [Fact]
-    public void Valid_WithAllParameters_Passes()
+    public void Valid_WithParameters_PassesShape()
     {
+        // Content rules live in the catalog; the DTO validator only checks shape.
         _validator.Validate(new AnalyzeRequest(Guid.NewGuid(),
             new() { ["vegetationCoverPct"] = 50, ["albedo"] = 0.5, ["shadingPct"] = 20 }))
             .IsValid.Should().BeTrue();
     }
 
     [Fact]
-    public void UnknownParameter_Fails()
+    public void NullParameters_Fails()
     {
-        _validator.Validate(new AnalyzeRequest(Guid.NewGuid(), new() { ["treeCount"] = 5 }))
-            .IsValid.Should().BeFalse();
-    }
-
-    [Theory]
-    [InlineData("vegetationCoverPct", -1)]
-    [InlineData("vegetationCoverPct", 101)]
-    [InlineData("albedo", -0.1)]
-    [InlineData("albedo", 1.1)]
-    [InlineData("shadingPct", 150)]
-    public void OutOfRange_Fails(string key, double value)
-    {
-        _validator.Validate(new AnalyzeRequest(Guid.NewGuid(), new() { [key] = value }))
-            .IsValid.Should().BeFalse();
+        _validator.Validate(new AnalyzeRequest(Guid.NewGuid(), null!)).IsValid.Should().BeFalse();
     }
 
     [Fact]

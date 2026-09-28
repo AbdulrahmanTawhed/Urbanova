@@ -27,7 +27,8 @@ public sealed class AnalysisService(
     IEnvironmentalAnalysisEngine engine,
     IEnvironmentalClassificationService classification,
     IOptions<HeatAnalysisOptions> heatOptions,
-    IOptions<ClassificationOptions> classOptions) : IAnalysisService
+    IOptions<ClassificationOptions> classOptions,
+    Urbanova.Application.Scenarios.ScenarioParameterCatalog parameterCatalog) : IAnalysisService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -54,6 +55,7 @@ public sealed class AnalysisService(
 
         var parameters = new SortedDictionary<string, double>(
             request.Parameters ?? new Dictionary<string, double>(), StringComparer.Ordinal);
+        ValidateParameters(parameters);
         return await ExecuteAsync(ownerId, projectId, file, parameters, scenarioId: null, ct);
     }
 
@@ -74,6 +76,7 @@ public sealed class AnalysisService(
         var parameters = new SortedDictionary<string, double>(
             JsonSerializer.Deserialize<Dictionary<string, double>>(scenario.ParametersJson) ?? [],
             StringComparer.Ordinal);
+        ValidateParameters(parameters);
 
         Guid fileId = fileIdOverride ?? Guid.Empty;
         if (fileId == Guid.Empty)
@@ -275,6 +278,19 @@ public sealed class AnalysisService(
             run.EngineName, run.EngineVersion, run.ConfigVersion, run.InputHash,
             run.Result.Metric, run.Result.Unit, run.Result.IsEstimated,
             values, summary, run.CreatedAt);
+    }
+
+    /// <summary>Re-scopes catalog errors (ScenarioException) to analysis semantics.</summary>
+    private void ValidateParameters(SortedDictionary<string, double> parameters)
+    {
+        try
+        {
+            parameterCatalog.Validate(parameters);
+        }
+        catch (Urbanova.Application.Scenarios.ScenarioException ex)
+        {
+            throw new AnalysisException(ex.ErrorCode, ex.Message);
+        }
     }
 
     private static string Hash(string text)

@@ -37,6 +37,9 @@ public sealed class RecommendationsController(
             {
                 "NOT_FOUND" => NotFound(),
                 "FORBIDDEN" => Forbid(),
+                "NO_EVIDENCE" => StatusCode(
+                    StatusCodes.Status422UnprocessableEntity,
+                    ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status422UnprocessableEntity)),
                 _ => BadRequest(ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status400BadRequest)),
             };
         }

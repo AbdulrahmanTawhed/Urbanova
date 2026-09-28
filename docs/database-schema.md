@@ -3,7 +3,8 @@
 Migrations: `InitialCreate` (Phase 2) + `AuthRefreshTokens` (Phase 3) +
 `RecommendationPolygonIndex` (Phase 10) + `ConcurrencyGuards` (review fixes:
 filtered unique `(ProjectId, InputHash)` where Succeeded; unique `(ProjectId, Version)`
-on Reports)
+on Reports) + `PrdV02_EvidenceAndQuantity` (PRD v0.2: `RecommendationRules` + seed,
+`Recommendations.RecommendationRuleId`, `CostEstimates.QuantitySource`)
 (applied to LocalDB `Urbanova_Dev`; tests use `Urbanova_Test`).
 
 ## Tables
@@ -18,8 +19,9 @@ on Reports)
 | `AnalysisRuns` | `Id` | `ProjectId RESTRICT`, `EngineeringFileId→SET NULL`, `ScenarioId→SET NULL` | `(ProjectId, InputHash)` idx, `InputHash nchar(64)`, `RowVersion` |
 | `AnalysisResults` | `Id` | `AnalysisRunId unique 1:1 CASCADE` | `ValuesJson` + `ClassificationSummaryJson nvarchar(max)`, `IsEstimated` |
 | `Scenarios` | `Id` | `ProjectId RESTRICT`, `ParentScenarioId self RESTRICT`, `BaseAnalysisRunId→SET NULL` | `(ProjectId, Kind)` idx, `ParametersJson nvarchar(max)`, `RowVersion` |
-| `Recommendations` | `Id` | `ProjectId RESTRICT`, `AnalysisRunId/ScenarioId/CostEstimateId→SET NULL` | `EvidenceLevel int`, `Confidence nullable` |
-| `CostEstimates` | `Id` | `ProjectId RESTRICT`, `RecommendationId/ScenarioId→SET NULL` | `Quantity/UnitPrice/Total decimal(18,4)`, `Currency default USD` |
+| `Recommendations` | `Id` | `ProjectId RESTRICT`, `AnalysisRunId/ScenarioId/CostEstimateId→SET NULL`, `RecommendationRuleId→RESTRICT` | `EvidenceLevel int`, `Confidence nullable`, `PolygonIndex` |
+| `RecommendationRules` | `Id` | — | `Code unique`, Title/Description, `ScientificReferencesJson nvarchar(max)`, ImpactBasis, EngineName/Version, `IsActive`; seeded `HEAT-VEG-001`, `HEAT-PREVENT-001` |
+| `CostEstimates` | `Id` | `ProjectId RESTRICT`, `RecommendationId/ScenarioId→SET NULL` | `Quantity/UnitPrice/Total decimal(18,4)`, `QuantitySource` default `UserProvided`, `Currency default USD` |
 | `Reports` | `Id` | `ProjectId RESTRICT` | `Format int`, `ContentJson nvarchar(max)`, `PayloadHash nchar(64)` |
 | `RefreshTokens` | `Id` | — | `UserId` idx, `TokenHash nchar(64) unique` (hash only, never plaintext), `ExpiresAt`, `RevokedAt`, `ReplacedByTokenHash` |
 

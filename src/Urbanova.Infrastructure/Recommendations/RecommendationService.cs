@@ -59,6 +59,19 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
                 Enum.Parse<ProblemClass>(v.Classification, ignoreCase: true)))],
             parameters), ct);
 
+        // Resolve every cited rule before writing anything: an unknown or inactive
+        // rule blocks the whole set with NO_EVIDENCE (PRD v0.2 §6) — never stored
+        // as an unvalidated recommendation.
+        var rules = new Dictionary<string, RecommendationRule>(StringComparer.Ordinal);
+        foreach (var code in generated.Select(g => g.RuleCode).Distinct(StringComparer.Ordinal))
+        {
+            var rule = await db.RecommendationRules
+                .SingleOrDefaultAsync(r => r.Code == code, ct);
+            if (rule is null || !rule.IsActive)
+                throw RecommendationException.NoEvidence(code);
+            rules[code] = rule;
+        }
+
         // Idempotent refresh: replace this run's rows atomically — concurrent readers
         // never see an empty set and concurrent writers cannot interleave duplicates.
         // Runs inside the execution strategy (EnableRetryOnFailure forbids raw transactions).
@@ -74,6 +87,7 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
                     ProjectId = projectId,
                     AnalysisRunId = run.Id,
                     ScenarioId = run.ScenarioId,
+                    RecommendationRuleId = rules[g.RuleCode].Id,
                     Problem = g.Problem,
                     Cause = g.Cause,
                     Intervention = g.Intervention,
@@ -92,6 +106,7 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
 
         var rows = await db.Recommendations
             .Where(r => r.AnalysisRunId == run.Id)
+            .Include(r => r.RecommendationRule)
             .OrderBy(r => r.CreatedAt)
             .ToListAsync(ct);
         return [.. rows.Select(ToResponse)];
@@ -126,6 +141,21 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
         r.Problem, r.Cause, r.Intervention,
         string.IsNullOrWhiteSpace(r.ExpectedImpactJson)
             ? null : JsonDocument.Parse(r.ExpectedImpactJson!).RootElement.Clone(),
-        r.EvidenceSource, r.EvidenceLevel.ToString(), r.Feasibility, r.Confidence,
+        r.RecommendationRule?.Code, r.EvidenceSource, r.EvidenceLevel.ToString(), r.Feasibility, r.Confidence,
+        ParseReferences(r.RecommendationRule?.ScientificReferencesJson),
         new RecommendationCostDto("Unavailable", "Cost estimation arrives in Phase 11."));
+
+    private static IReadOnlyList<string> ParseReferences(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 }

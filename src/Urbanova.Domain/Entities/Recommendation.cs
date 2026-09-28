@@ -21,6 +21,11 @@ public sealed class Recommendation : EntityBase
 
     public CostEstimate? CostEstimate { get; set; }
 
+    /// <summary>Evidence rule backing this recommendation (PRD v0.2 §5). Required.</summary>
+    public Guid? RecommendationRuleId { get; set; }
+
+    public RecommendationRule? RecommendationRule { get; set; }
+
     /// <summary>Design-area index this recommendation targets (Phase 10).</summary>
     public int PolygonIndex { get; set; }
 

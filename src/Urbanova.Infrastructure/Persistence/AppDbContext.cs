@@ -25,6 +25,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<CostEstimate> CostEstimates => Set<CostEstimate>();
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<RecommendationRule> RecommendationRules => Set<RecommendationRule>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

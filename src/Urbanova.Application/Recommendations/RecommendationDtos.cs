@@ -15,8 +15,10 @@ public sealed record RecommendationResponse(
     string Cause,
     string Intervention,
     JsonElement? ExpectedImpact,
+    string? RuleCode,
     string? EvidenceSource,
     string EvidenceLevel,
     string? Feasibility,
     double? Confidence,
+    IReadOnlyList<string> ScientificReferences,
     RecommendationCostDto Cost);

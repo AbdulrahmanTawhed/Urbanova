@@ -23,6 +23,7 @@ public sealed record GeneratedRecommendation(
     string Cause,
     string Intervention,
     ExpectedImpact ExpectedImpact,
+    string RuleCode,
     string EvidenceSource,
     EvidenceLevel EvidenceLevel,
     string Feasibility,

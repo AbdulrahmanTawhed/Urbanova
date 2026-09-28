@@ -63,10 +63,10 @@ Areas are planar CRS units (`deg²` for EPSG:4326) — not m².
 
 | Method | Route | Success | Errors |
 |---|---|---|---|
-| POST | `/api/projects/{id}/scenarios` `{name, baseAnalysisRunId?, parentScenarioId?, parameters?}` (no parent → locked Baseline; parent → Alternative inheriting baseline) | 201 | 400, 401/403/404 |
+| POST | `/api/projects/{id}/scenarios` `{name, baseAnalysisRunId?, parentScenarioId?, parameters?}` (no parent → locked Baseline; parent → Alternative inheriting baseline; parameters validated against the `ScenarioParameters` catalog, max 3) | 201 | 400 incl. UNSUPPORTED_/INVALID_/TOO_MANY_SCENARIO_PARAMETER, 401/403/404 |
 | GET | `/api/projects/{id}/scenarios` | 200 ScenarioResponse[] | 401/403/404 |
 | GET | `/api/scenarios/{id}` | 200 | 401/403/404 |
-| PUT | `/api/scenarios/{id}` `{name?, parameters?, rowVersion!}` (alternatives only; Version++) | 200 | 400/401/403/404, 409 SCENARIO_LOCKED / stale |
+| PUT | `/api/scenarios/{id}` `{name?, parameters?, rowVersion!}` (alternatives only; Version++; catalog-validated) | 200 | 400 incl. parameter codes, 401/403/404, 409 SCENARIO_LOCKED / stale |
 | POST | `/api/scenarios/{id}/analyze` `{fileId?}` (baseline-run file default) | 201 fresh / 200 replay | 401/403/404, 422 no-source/geometry |
 
 ## Comparison
@@ -81,7 +81,7 @@ Cost dimension fills from scenario-linked Calculated estimates, else Unavailable
 
 | Method | Route | Success | Errors |
 |---|---|---|---|
-| GET | `/api/projects/{id}/recommendations?runId=` (default: latest succeeded run) | 200 RecommendationResponse[] `{problem, cause, intervention, expectedImpact, evidenceSource, evidenceLevel, feasibility, confidence: null, cost: Unavailable}` | 400 no analysis, 401/403/404 |
+| GET | `/api/projects/{id}/recommendations?runId=` (default: latest succeeded run) | 200 RecommendationResponse[] `{problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility, confidence: null, scientificReferences[], cost: Unavailable}` | 400 no analysis, 401/403/404, 422 NO_EVIDENCE (rule unknown/inactive; nothing stored) |
 
 Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
 
@@ -89,7 +89,7 @@ Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
 
 | Method | Route | Success | Errors |
 |---|---|---|---|
-| POST | `/api/projects/{id}/cost-estimates` `{quantity≥0, unit, unitPrice?\|itemCode?, currency?=USD, recommendationId?, scenarioId?}` | 201 (Calculated or Unavailable) | 400 neither price nor code / bad links, 401/403/404 |
+| POST | `/api/projects/{id}/cost-estimates` `{quantity?≥0 (nullable), unit, unitPrice?\|itemCode?, currency?=USD, recommendationId?, scenarioId?}` (quantity omitted + rec + m² → derived from polygon area as `DerivedFromGeometry`, else 400) | 201 (Calculated or Unavailable; response includes `quantitySource`) | 400 neither price nor code / bad links / quantity missing, 401/403/404 |
 | GET | `/api/projects/{id}/cost-estimates` | 200 list | 401/403/404 |
 | GET | `/api/cost-estimates/{id}` | 200 | 401/403/404 |
 
@@ -114,5 +114,7 @@ Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
 `EMAIL_TAKEN, INVALID_CREDENTIALS, INVALID_REFRESH_TOKEN, REGISTRATION_INVALID,
 NOT_FOUND, FORBIDDEN, CONCURRENCY_CONFLICT, SCENARIO_LOCKED, EMPTY_FILE,
 FILE_DUPLICATE, FILE_TOO_LARGE, UNSUPPORTED_FORMAT, INVALID_FILE,
-GEOMETRY_EXTRACTION_FAILED, NO_ANALYSIS, INVALID_COMPARISON, INVALID_COST,
-INVALID_REPORT, INVALID_SCENARIO, ANALYSIS_FAILED, FILE_STORAGE_ERROR, INTERNAL_ERROR`
+GEOMETRY_EXTRACTION_FAILED, NO_ANALYSIS, NO_EVIDENCE, INVALID_COMPARISON, INVALID_COST,
+INVALID_REPORT, INVALID_SCENARIO, UNSUPPORTED_SCENARIO_PARAMETER,
+INVALID_SCENARIO_PARAMETER, TOO_MANY_SCENARIO_PARAMETERS,
+ANALYSIS_FAILED, FILE_STORAGE_ERROR, INTERNAL_ERROR`

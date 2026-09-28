@@ -19,6 +19,9 @@ public sealed class CostEstimate : EntityBase
 
     public decimal Quantity { get; set; }
 
+    /// <summary>How the quantity was obtained: UserProvided or DerivedFromGeometry (PRD v0.2 §18).</summary>
+    public string QuantitySource { get; set; } = "UserProvided";
+
     public string Unit { get; set; } = string.Empty;
 
     public decimal UnitPrice { get; set; }

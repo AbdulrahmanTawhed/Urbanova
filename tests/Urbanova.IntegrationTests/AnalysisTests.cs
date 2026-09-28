@@ -141,6 +141,20 @@ public sealed class AnalysisTests : IAsyncLifetime
         var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
             new AnalyzeRequest(file.Id, new() { ["treeCount"] = 1 }));
         res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("UNSUPPORTED_SCENARIO_PARAMETER");
+    }
+
+    [Fact]
+    public async Task Run_TooManyParams_Returns400()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, new()
+            {
+                ["vegetationCoverPct"] = 10, ["albedo"] = 0.5, ["shadingPct"] = 10, ["extra"] = 1,
+            }));
+        res.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("TOO_MANY_SCENARIO_PARAMETERS");
     }
 
     [Fact]

@@ -3,7 +3,8 @@ using Urbanova.Application.Scenarios;
 
 namespace Urbanova.UnitTests;
 
-/// <summary>Phase 8: scenario request validation (closed MVP parameter set).</summary>
+/// <summary>Scenario request shape validation. Parameter content moved to
+/// ScenarioParameterCatalog (PRD v0.2) — see ScenarioParameterCatalogTests.</summary>
 public sealed class ScenarioValidatorTests
 {
     [Fact]
@@ -24,14 +25,6 @@ public sealed class ScenarioValidatorTests
     }
 
     [Fact]
-    public void Create_UnknownParam_Fails()
-    {
-        new CreateScenarioRequestValidator()
-            .Validate(new CreateScenarioRequest("A", null, null, new() { ["treeCount"] = 1 }))
-            .IsValid.Should().BeFalse();
-    }
-
-    [Fact]
     public void Update_MissingRowVersion_Fails()
     {
         new UpdateScenarioRequestValidator()
@@ -48,10 +41,11 @@ public sealed class ScenarioValidatorTests
     }
 
     [Fact]
-    public void Update_BadAlbedo_Fails()
+    public void Update_WithParameters_PassesShape()
     {
+        // Content rules live in the catalog; the DTO validator only checks shape.
         new UpdateScenarioRequestValidator()
             .Validate(new UpdateScenarioRequest(null, new() { ["albedo"] = 2 }, [1]))
-            .IsValid.Should().BeFalse();
+            .IsValid.Should().BeTrue();
     }
 }

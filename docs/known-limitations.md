@@ -1,12 +1,15 @@
-# Known Limitations (Phase 14)
+# Known Limitations (Phase 14 + PRD v0.2)
 
 ## By design (tracked in `assumptions.md`, awaiting validation)
 
 - GeoJSON-only file support; single heat proxy metric in °C; temporary 30/35 bands.
-- Closed 3-parameter scenario set; no recommendation confidence model.
+- Configurable 3-parameter scenario catalog (keys, bands, cap all temporary);
+  canonical key names still open; no recommendation confidence model.
 - Placeholder price catalog (not market data); no regional/dynamic pricing.
 - JSON + HTML reports only (no PDF); owner-only auth (no roles).
 - Planar CRS-unit areas (deg²), not square meters; all values estimated, none validated.
+- Evidence-rule references are MVP placeholders; quantity derivation covers m²
+  area-based interventions only.
 
 ## Engineering gaps (future work, not PRD blockers)
 

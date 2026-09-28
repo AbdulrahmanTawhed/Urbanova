@@ -64,6 +64,8 @@ public static class DependencyInjection
         services.AddScoped<IEnvironmentalClassificationService, ThresholdClassificationService>();
         services.AddScoped<IAnalysisService, AnalysisService>();
         // Phase 8: scenarios (validators live beside the service; Api registers them explicitly).
+        services.Configure<ScenarioParameterOptions>(config.GetSection(ScenarioParameterOptions.SectionName));
+        services.AddScoped<ScenarioParameterCatalog>();
         services.AddScoped<IScenarioService, ScenarioService>();
         // Phase 9: comparison (methodology swappable via IScenarioComparisonService).
         services.AddScoped<IScenarioComparisonService, ComparisonEngine>();

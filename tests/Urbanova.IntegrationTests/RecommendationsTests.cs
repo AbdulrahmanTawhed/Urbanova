@@ -102,6 +102,46 @@ public sealed class RecommendationsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Recs_CarryRuleCode_AndReferences()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var res = await client.GetAsync($"/api/projects/{projectId}/recommendations");
+        var rec = ((await res.Content.ReadFromJsonAsync<RecommendationResponse[]>())!)
+            .Should().ContainSingle().Subject;
+        rec.RuleCode.Should().Be("HEAT-PREVENT-001");
+        rec.ScientificReferences.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task InactiveRule_BlocksGeneration_WithNoEvidence()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, [])); // Moderate → HEAT-PREVENT-001
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rule = await db.RecommendationRules.SingleAsync(r => r.Code == "HEAT-PREVENT-001");
+            rule.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+
+        var res = await client.GetAsync($"/api/projects/{projectId}/recommendations");
+        res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await res.Content.ReadAsStringAsync()).Should().Contain("NO_EVIDENCE");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Recommendations.CountAsync()).Should().Be(0, "blocked generation stores nothing");
+        }
+    }
+
+    [Fact]
     public async Task ProblemRun_YieldsCalculatedIntervention()
     {
         // Engine max (34.4°C) cannot reach ProblemArea, so a stored 36°C run exercises the path.

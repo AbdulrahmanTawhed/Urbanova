@@ -71,6 +71,9 @@ public sealed class AnalysisController(
         "INVALID_FILE" or "GEOMETRY_EXTRACTION_FAILED" => StatusCode(
             StatusCodes.Status422UnprocessableEntity,
             ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status422UnprocessableEntity)),
+        "INVALID_SCENARIO_PARAMETER" or "UNSUPPORTED_SCENARIO_PARAMETER"
+            or "TOO_MANY_SCENARIO_PARAMETERS" => BadRequest(
+            ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status400BadRequest)),
         _ => StatusCode( // ANALYSIS_FAILED and unexpected: stored as Failed, never partial-valid
             StatusCodes.Status500InternalServerError,
             ProblemDetail(ex.ErrorCode, ex.Message, StatusCodes.Status500InternalServerError)),
