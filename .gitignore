@@ -1,0 +1,19 @@
+## .NET gitignore (minimal)
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+*.user
+*.suo
+.vs/
+TestResults/
+coverage*/
+AppData/uploads/
+AppData/reports/
+*.db
+*.mdf
+*.ldf
+.env
+appsettings.*.local.json
+# Local manual API test payloads (Scalar/curl scratch files)
+/analysis.json
+/project.json

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Urbanova.Api/Urbanova.Api.csproj" />
+    <Project Path="src/Urbanova.Application/Urbanova.Application.csproj" />
+    <Project Path="src/Urbanova.Domain/Urbanova.Domain.csproj" />
+    <Project Path="src/Urbanova.Infrastructure/Urbanova.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Urbanova.IntegrationTests/Urbanova.IntegrationTests.csproj" />
+    <Project Path="tests/Urbanova.UnitTests/Urbanova.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,27 @@
+{
+  "//": "MVP PLACEHOLDER PRICES — NOT real market data. Pending a reliable price feed (assumptions.md #8). Missing codes yield CostStatus.Unavailable, never an invented price.",
+  "currency": "USD",
+  "items": [
+    {
+      "code": "veg-planting-m2",
+      "description": "Placeholder: vegetation planting per square metre",
+      "unit": "m2",
+      "unitPrice": 8.50,
+      "source": "MVP placeholder (2026) — pending real price feed"
+    },
+    {
+      "code": "shade-structure-m2",
+      "description": "Placeholder: shade structure per square metre",
+      "unit": "m2",
+      "unitPrice": 45.00,
+      "source": "MVP placeholder (2026) — pending real price feed"
+    },
+    {
+      "code": "reflective-coating-m2",
+      "description": "Placeholder: reflective surface coating per square metre",
+      "unit": "m2",
+      "unitPrice": 12.00,
+      "source": "MVP placeholder (2026) — pending real price feed"
+    }
+  ]
+}
