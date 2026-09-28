@@ -56,6 +56,7 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
         var existing = await db.Recommendations
             .Where(r => r.AnalysisRunId == run.Id)
             .Include(r => r.RecommendationRule)
+            .Include(r => r.CostEstimate)
             .OrderBy(r => r.CreatedAt)
             .ToListAsync(ct);
         if (existing.Count > 0)
@@ -130,6 +131,7 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
         var rows = await db.Recommendations
             .Where(r => r.AnalysisRunId == run.Id)
             .Include(r => r.RecommendationRule)
+            .Include(r => r.CostEstimate)
             .OrderBy(r => r.CreatedAt)
             .ToListAsync(ct);
         return [.. rows.Select(ToResponse)];
@@ -166,7 +168,22 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
             ? null : JsonDocument.Parse(r.ExpectedImpactJson!).RootElement.Clone(),
         r.RecommendationRule?.Code, r.EvidenceSource, r.EvidenceLevel.ToString(), r.Feasibility, r.Confidence,
         ParseReferences(r.RecommendationRule?.ScientificReferencesJson),
-        new RecommendationCostDto("Unavailable", "Cost estimation arrives in Phase 11."));
+        ToCost(r.CostEstimate));
+
+    /// <summary>
+    /// Truthful two-field cost summary from the persisted link. The stored
+    /// <see cref="CostEstimate"/> row is the source of truth — never recalculated
+    /// here. Unlinked or dangling links stay Unavailable; a linked Unavailable
+    /// row never presents its Total of 0 as a confirmed price.
+    /// </summary>
+    private static RecommendationCostDto ToCost(CostEstimate? estimate) => estimate switch
+    {
+        { Status: CostStatus.Calculated } => new RecommendationCostDto("Calculated", null),
+        { Status: CostStatus.Unavailable } => new RecommendationCostDto(
+            "Unavailable", "Linked cost estimate has no reliable price yet."),
+        _ => new RecommendationCostDto(
+            "Unavailable", "No cost estimate linked to this recommendation yet."),
+    };
 
     private static IReadOnlyList<string> ParseReferences(string? json)
     {

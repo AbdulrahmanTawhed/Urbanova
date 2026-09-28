@@ -122,6 +122,7 @@ public sealed class RecommendationsTests : IAsyncLifetime
         var again = second.Should().ContainSingle().Subject;
         again.Id.Should().Be(rec.Id, "retrieval must be non-destructive for an immutable run");
         again.Intervention.Should().Be(rec.Intervention);
+        again.Cost.Status.Should().Be("Calculated", "the persisted link is the source of truth");
 
         using (var scope = _factory.Services.CreateScope())
         {
@@ -130,6 +131,100 @@ public sealed class RecommendationsTests : IAsyncLifetime
             row.CostEstimateId.Should().NotBeNull("repeated GET must not orphan the linked estimate");
             var estimate = await db.CostEstimates.SingleAsync(e => e.Total == 850m && e.ProjectId == projectId);
             estimate.RecommendationId.Should().Be(rec.Id);
+        }
+    }
+
+    [Fact]
+    public async Task Get_AfterLinkedCalculatedEstimate_ExposesCalculatedCostStatus()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var first = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var rec = first.Should().ContainSingle().Subject;
+        rec.Cost.Status.Should().Be("Unavailable");
+
+        var cost = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(100, "m2", 8.50m, null, "USD", rec.Id, null));
+        cost.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var res = await client.GetAsync($"/api/projects/{projectId}/recommendations");
+        res.StatusCode.Should().Be(HttpStatusCode.OK);
+        var again = ((await res.Content.ReadFromJsonAsync<RecommendationResponse[]>())!)
+            .Should().ContainSingle().Subject;
+        again.Id.Should().Be(rec.Id);
+        again.Cost.Status.Should().Be("Calculated");
+        again.Cost.Reason.Should().BeNull();
+        again.RuleCode.Should().Be(rec.RuleCode);
+        again.EvidenceLevel.Should().Be(rec.EvidenceLevel);
+        again.Intervention.Should().Be(rec.Intervention);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Recommendations.CountAsync(r => r.ProjectId == projectId)).Should().Be(1,
+                "mapping the linked status must not duplicate recommendations");
+            var row = await db.Recommendations.SingleAsync(r => r.Id == rec.Id);
+            row.CostEstimateId.Should().NotBeNull();
+            var estimate = await db.CostEstimates.SingleAsync(e => e.Id == row.CostEstimateId);
+            estimate.Status.Should().Be(CostStatus.Calculated);
+            estimate.RecommendationId.Should().Be(rec.Id);
+        }
+    }
+
+    [Fact]
+    public async Task UnlinkedRecommendation_StaysUnavailable_WithHonestReason()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var first = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var rec = first.Should().ContainSingle().Subject;
+        rec.Cost.Status.Should().Be("Unavailable");
+        rec.Cost.Reason.Should().NotBeNullOrWhiteSpace();
+
+        var second = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var again = second.Should().ContainSingle().Subject;
+        again.Id.Should().Be(rec.Id);
+        again.Cost.Status.Should().Be("Unavailable");
+        again.Cost.Reason.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task Get_AfterLinkedUnavailableEstimate_StaysUnavailable_WithHonestReason()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var first = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var rec = first.Should().ContainSingle().Subject;
+
+        // Unknown catalog code stores an Unavailable row; linking it to a
+        // recommendation is permitted by the current cost contract.
+        var cost = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(5, "m2", null, "no-such-item", null, rec.Id, null));
+        cost.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await cost.Content.ReadFromJsonAsync<CostEstimateResponse>())!.Status.Should().Be("Unavailable");
+
+        var again = ((await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!)
+            .Should().ContainSingle().Subject;
+        again.Id.Should().Be(rec.Id);
+        again.Cost.Status.Should().Be("Unavailable");
+        again.Cost.Reason.Should().NotBeNullOrWhiteSpace();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.Recommendations.SingleAsync(r => r.Id == rec.Id);
+            row.CostEstimateId.Should().NotBeNull("the unavailable link must survive reads");
         }
     }
 
