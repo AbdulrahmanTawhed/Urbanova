@@ -2,10 +2,12 @@ using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Urbanova.Application.Costing;
+using Urbanova.Application.EngineeringFiles;
 using Urbanova.Domain;
 using Urbanova.Domain.BusinessRules;
 using Urbanova.Domain.Costing;
 using Urbanova.Domain.Entities;
+using Urbanova.Domain.ValueObjects;
 using Urbanova.Infrastructure.Persistence;
 
 namespace Urbanova.Infrastructure.Costing;
@@ -18,6 +20,8 @@ namespace Urbanova.Infrastructure.Costing;
 public sealed class CostService(
     AppDbContext db,
     IPriceCatalog catalog,
+    IProcessorRegistry registry,
+    IFileStorage storage,
     IValidator<CreateCostEstimateRequest> validator) : ICostService
 {
     public async Task<CostEstimateResponse> CreateAsync(
@@ -143,30 +147,85 @@ public sealed class CostService(
             throw owner is null ? CostException.NotFound(estimateId) : CostException.Forbidden();
         return ToResponse(row);
     }
-
     private async Task<(decimal Quantity, string Source)> ResolveQuantityAsync(
         CreateCostEstimateRequest request, Recommendation? recommendation, CancellationToken ct)
     {
         if (request.Quantity is not null)
             return (request.Quantity.Value, "UserProvided");
 
+        // Derive from geometry: re-extract the analyzed file's rings (lon/lat degrees)
+        // and compute geodesic m². Never relabels the stored planar deg² area as m².
         if (recommendation is not null
             && recommendation.AnalysisRunId is not null
             && IsSquareMetres(request.Unit))
         {
-            var run = await db.AnalysisRuns
-                .Include(r => r.Result)
-                .SingleOrDefaultAsync(r => r.Id == recommendation.AnalysisRunId, ct);
-            var area = run?.Result is null ? null : FindPolygonArea(run.Result.ValuesJson, recommendation.PolygonIndex);
-            if (area is not null)
-                return ((decimal)Math.Round(area.Value, 4), "DerivedFromGeometry");
+            var areaM2 = await GeodesicPolygonAreaM2Async(recommendation, ct);
+            if (areaM2 is not null)
+            {
+                var quantity = Math.Round(areaM2.Value, 2);
+                // A valid non-zero polygon must never collapse to zero: rounding that
+                // small must reject instead of storing a fabricated zero.
+                if (quantity > 0)
+                    return ((decimal)quantity, "DerivedFromGeometry");
+            }
         }
 
         throw CostException.Invalid(
             "Quantity is required. Omit it only with a RecommendationId for area-based " +
-            "interventions (unit m2, m², m^2 or sqm) backed by analyzed geometry.");
+            "interventions (unit m2, m², m^2 or sqm) backed by analyzable EPSG:4326 geometry.");
     }
 
+    /// <summary>
+    /// Re-extracts the recommendation's analyzed file and returns the geodesic m² area
+    /// of the targeted polygon, or null when geometry is missing, non-WGS84, or unmatched.
+    /// </summary>
+    private async Task<double?> GeodesicPolygonAreaM2Async(Recommendation recommendation, CancellationToken ct)
+    {
+        var run = await db.AnalysisRuns.SingleOrDefaultAsync(r => r.Id == recommendation.AnalysisRunId, ct);
+        var file = run?.EngineeringFileId is null
+            ? null
+            : await db.EngineeringFiles.SingleOrDefaultAsync(f => f.Id == run.EngineeringFileId, ct);
+        if (file is null)
+            return null;
+
+        var processor = registry.FindByFormat(file.FormatDetected ?? "")
+            ?? registry.Find(file.FileName, file.ContentType);
+        if (processor is null)
+            return null;
+
+        NormalizedGeometry geometry;
+        try
+        {
+            await using var stream = await storage.OpenReadAsync(file.StoragePath, ct);
+            var extraction = await processor.ExtractGeometryAsync(stream, file.FileName, ct);
+            if (!extraction.Success || extraction.Geometry is null)
+                return null;
+            geometry = await processor.NormalizeGeometryAsync(extraction.Geometry, ct);
+        }
+        catch (FileException)
+        {
+            // Stored content gone or unreadable → not derivable; caller rejects.
+            return null;
+        }
+
+        // Only lon/lat-degree geometries can feed the spherical computation.
+        if (!geometry.Crs.Equals("EPSG:4326", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var polygon = geometry.Polygons
+            .Select((p, i) => (Polygon: p, Index: i))
+            .FirstOrDefault(t => t.Index == recommendation.PolygonIndex)
+            .Polygon;
+        if (polygon is null)
+            return null;
+        try
+        {
+            return GeodesicAreas.PolygonAreaM2(polygon.Rings);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
     /// <summary>Area-unit spellings accepted for geometry-derived quantities.</summary>
     private static bool IsSquareMetres(string unit)
     {
@@ -174,28 +233,6 @@ public sealed class CostService(
         return u is "m2" or "m²" or "m^2" or "sqm";
     }
 
-    private static double? FindPolygonArea(string valuesJson, int polygonIndex)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(valuesJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return null;
-            foreach (var el in doc.RootElement.EnumerateArray())
-            {
-                if (el.TryGetProperty("polygonIndex", out var idx)
-                    && idx.GetInt32() == polygonIndex
-                    && el.TryGetProperty("area", out var area)
-                    && area.ValueKind == JsonValueKind.Number)
-                    return area.GetDouble();
-            }
-        }
-        catch (JsonException)
-        {
-            // Corrupt values → not derivable; caller rejects instead of inventing.
-        }
-        return null;
-    }
 
     private static CostEstimateResponse ToResponse(CostEstimate e) => new(
         e.Id, e.ProjectId, e.RecommendationId, e.ScenarioId,

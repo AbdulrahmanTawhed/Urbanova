@@ -10,6 +10,8 @@
 - Planar CRS-unit areas (deg²), not square meters; all values estimated, none validated.
 - Evidence-rule references are MVP placeholders; quantity derivation covers m²
   area-based interventions only.
+- Derived quantities use spherical-earth areas (~0.3% off the WGS84 ellipsoid);
+  non-EPSG:4326 geometries and sub-centimeter rounded areas are rejected, not stored.
 
 ## Engineering gaps (future work, not PRD blockers)
 

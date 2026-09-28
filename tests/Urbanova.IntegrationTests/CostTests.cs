@@ -186,9 +186,14 @@ public sealed class CostTests : IAsyncLifetime
             new CreateCostEstimateRequest(null, "m2", 8.50m, null, null, rec.Id, null));
         res.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = (await res.Content.ReadFromJsonAsync<CostEstimateResponse>())!;
-        body.Quantity.Should().Be(4m, "2×2 square polygon area");
+        // Spherical reference for the 2°×2° (lat 0–2) square: R²·Δλ·(sin2°−sin0°) ≈ 4.9447e10 m².
+        // Must be positive real square meters — never the planar 4 deg², never rounded to 0.
+        body.Quantity.Should().BeGreaterThan(0);
+        body.Quantity.Should().BeApproximately(49447203765.22m, 1_000_000m);
         body.QuantitySource.Should().Be("DerivedFromGeometry");
-        body.Total.Should().Be(34.00m);
+        body.Unit.Should().Be("m2");
+        body.Total.Should().Be(body.Quantity * 8.50m);
+        body.Status.Should().Be("Calculated");
     }
 
     [Fact]
@@ -213,8 +218,48 @@ public sealed class CostTests : IAsyncLifetime
             new CreateCostEstimateRequest(null, "m²", 8.50m, null, null, rec.Id, null));
         res.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = (await res.Content.ReadFromJsonAsync<CostEstimateResponse>())!;
-        body.Quantity.Should().Be(4m);
+        body.Quantity.Should().BeGreaterThan(0);
+        body.Quantity.Should().BeApproximately(49447203765.22m, 1_000_000m);
         body.QuantitySource.Should().Be("DerivedFromGeometry");
+        body.Total.Should().Be(body.Quantity * 8.50m);
+    }
+
+    [Fact]
+    public async Task Create_TinyRealWorldPolygon_DerivesPositiveQuantity()
+    {
+        // Regression: ~3.2e-6 deg² (real urban plot) rounded to quantity 0.
+        const string tiny = """
+            { "type": "FeatureCollection", "features": [
+              { "type": "Feature", "properties": { "name": "Plot" },
+                "geometry": { "type": "Polygon", "coordinates": [[
+                  [31.2357, 30.0444], [31.2377, 30.0444],
+                  [31.2377, 30.0460], [31.2357, 30.0460], [31.2357, 30.0444]
+                ]] } } ] }
+            """;
+        var (client, projectId) = await SetupAsync();
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(tiny)), "file", "plot.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{projectId}/files", form);
+        up.StatusCode.Should().Be(HttpStatusCode.Created);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+        var recs = await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations");
+        var rec = recs.Should().ContainSingle().Subject;
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(null, "m2", 50m, null, "EGP", rec.Id, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = (await res.Content.ReadFromJsonAsync<CostEstimateResponse>())!;
+        body.Quantity.Should().BeGreaterThan(0, "a valid non-zero polygon must never derive zero");
+        body.QuantitySource.Should().Be("DerivedFromGeometry");
+        body.Unit.Should().Be("m2");
+        body.Total.Should().Be(body.Quantity * 50m);
+        body.Status.Should().Be("Calculated");
     }
 
     [Fact]

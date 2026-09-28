@@ -34,11 +34,14 @@ all previously working behavior are preserved; only the deltas below were applie
   Unknown/inactive code → generation blocked with `NO_EVIDENCE` → 422, nothing stored.
 - Responses expose `ruleCode` + `scientificReferences`. Engine stays rule-based
   (no AI generation); `EvidenceLevel` values and never-`Validated` rule preserved.
-
 ### Cost quantity — Approved Requirement (traceable)
-- `Quantity` optional on create; when omitted with a `RecommendationId` and unit
-  `m2`, it is derived from the recommendation's analyzed polygon area and reported
+
+- `Quantity` optional on create; when omitted with a `RecommendationId` and area
+  unit, it is derived from the recommendation's analyzed polygon area and reported
   as `DerivedFromGeometry`. Otherwise quantity is required (400) — never invented.
+- Derivation re-extracts the analyzed file's rings and computes geodesic m²
+  (spherical earth, R = 6 371 000 m) — the stored planar deg² value is never
+  relabeled as m². Non-EPSG:4326 geometries and zero-rounding results reject (400).
 - `QuantitySource` (`UserProvided`/`DerivedFromGeometry`) persisted and returned.
 - Formula, catalog behavior, and `Unavailable` semantics unchanged.
 
