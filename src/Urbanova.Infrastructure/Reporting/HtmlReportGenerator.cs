@@ -67,8 +67,13 @@ public sealed class HtmlReportGenerator : IReportGenerator
                 .Select(RenderRecommendation)));
 
         Section(h, "Estimated cost",
-            $"<p>Calculated: {model.Costs.CalculatedCount} estimate(s), total {model.Costs.CalculatedTotal} {E(model.Costs.Currency)} · " +
-            $"Unavailable: {model.Costs.UnavailableCount}</p>");
+            model.Costs.Status == "Calculated"
+                ? $"<p>Calculated: {model.Costs.CalculatedCount} estimate(s), " +
+                  $"total {model.Costs.CalculatedTotal} {E(model.Costs.Currency)} · " +
+                  $"Unavailable: {model.Costs.UnavailableCount}</p>"
+                : $"<p>Calculated: {model.Costs.CalculatedCount} estimate(s) · " +
+                  $"Unavailable: {model.Costs.UnavailableCount}</p>" +
+                  Unavailable(new ReportSectionStatus("Unavailable", model.Costs.Reason)));
 
         Section(h, "Decision-support summary",
             "<ul>" + string.Concat(model.DecisionSummary.Select(s => $"<li>{E(s)}</li>")) + "</ul>" +

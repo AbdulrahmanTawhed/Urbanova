@@ -129,6 +129,9 @@ public sealed class ReportsTests : IAsyncLifetime
         root.GetProperty("comparison").GetProperty("meanDelta").GetDouble().Should().BeApproximately(2.4, 1e-9);
         root.GetProperty("recommendations").GetArrayLength().Should().BeGreaterThan(0);
         root.GetProperty("costs").GetProperty("calculatedTotal").GetDecimal().Should().Be(100m);
+        root.GetProperty("costs").GetProperty("status").GetString().Should().Be("Calculated");
+        root.GetProperty("costs").GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
+        root.GetProperty("costs").GetProperty("currency").GetString().Should().Be("USD");
         root.GetProperty("decisionSummary").GetArrayLength().Should().BeGreaterThan(0);
         root.GetProperty("caveats").GetArrayLength().Should().BeGreaterThan(0);
 
@@ -136,6 +139,145 @@ public sealed class ReportsTests : IAsyncLifetime
         var second = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
             new CreateReportRequest(null, null, null));
         (await second.Content.ReadFromJsonAsync<ReportResponse>())!.Version.Should().Be(2);
+    }
+
+    private async Task<(HttpClient Client, Guid ProjectId)> SetupCostProjectAsync(string name)
+    {
+        var reg = await _anon.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest($"rp-{Guid.NewGuid():N}@example.com", "Str0ng!Pass1", null));
+        var auth = (await reg.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest(name, null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+        return (client, project.Id);
+    }
+
+    [Fact]
+    public async Task GenerateJson_SameCurrency_SumsTotal()
+    {
+        var (client, projectId) = await SetupCostProjectAsync("CostSame");
+
+        var first = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 10m, null, "USD", null, null));
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+        var secondCost = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 6m, null, "USD", null, null));
+        secondCost.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var costs = doc.RootElement.GetProperty("costs");
+        costs.GetProperty("status").GetString().Should().Be("Calculated");
+        costs.GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedTotal").GetDecimal().Should().Be(160m);
+        costs.GetProperty("currency").GetString().Should().Be("USD");
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(2);
+
+        doc.RootElement.GetProperty("decisionSummary").EnumerateArray()
+            .Select(e => e.GetString()).Should().Contain(s => s!.Contains("160") && s.Contains("USD"));
+
+        var htmlRes = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Html", null, null));
+        var htmlReport = (await htmlRes.Content.ReadFromJsonAsync<ReportResponse>())!;
+        var html = await (await client.GetAsync($"/api/reports/{htmlReport.Id}/file")).Content.ReadAsStringAsync();
+        html.Should().Contain("total 160").And.Contain("USD");
+    }
+
+    [Fact]
+    public async Task GenerateJson_MixedCurrencies_NoSingleTotal()
+    {
+        var (client, projectId) = await SetupCostProjectAsync("CostMixed");
+
+        var usd = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 10m, null, "USD", null, null));
+        usd.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await usd.Content.ReadFromJsonAsync<CostEstimateResponse>())!.Status.Should().Be("Calculated");
+        var eur = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 6m, null, "EUR", null, null));
+        eur.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await eur.Content.ReadFromJsonAsync<CostEstimateResponse>())!.Status.Should().Be("Calculated");
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var costs = doc.RootElement.GetProperty("costs");
+        costs.GetProperty("status").GetString().Should().Be("Unavailable");
+        costs.GetProperty("reason").GetString().Should().Contain("multiple currencies");
+        costs.GetProperty("calculatedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("currency").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(2);
+
+        doc.RootElement.GetProperty("decisionSummary").EnumerateArray()
+            .Select(e => e.GetString()).Should().NotContain(s => s!.Contains("160"));
+
+        var htmlRes = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Html", null, null));
+        var htmlReport = (await htmlRes.Content.ReadFromJsonAsync<ReportResponse>())!;
+        var html = await (await client.GetAsync($"/api/reports/{htmlReport.Id}/file")).Content.ReadAsStringAsync();
+        html.Should().Contain("multiple currencies").And.NotContain("160");
+    }
+
+    [Fact]
+    public async Task GenerateJson_NoCalculatedEstimates_HonestlyUnavailable()
+    {
+        var (client, projectId) = await SetupCostProjectAsync("CostNone");
+
+        var unavailable = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(3, "m2", null, "unobtanium-m2", null, null, null));
+        unavailable.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await unavailable.Content.ReadFromJsonAsync<CostEstimateResponse>())!.Status.Should().Be("Unavailable");
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var costs = doc.RootElement.GetProperty("costs");
+        costs.GetProperty("status").GetString().Should().Be("Unavailable");
+        costs.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+        costs.GetProperty("calculatedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("currency").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(0);
+        costs.GetProperty("unavailableCount").GetInt32().Should().Be(1);
+
+        var htmlRes = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Html", null, null));
+        var htmlReport = (await htmlRes.Content.ReadFromJsonAsync<ReportResponse>())!;
+        var html = await (await client.GetAsync($"/api/reports/{htmlReport.Id}/file")).Content.ReadAsStringAsync();
+        html.Should().NotContain("total 0 USD");
+    }
+
+    [Fact]
+    public async Task GenerateJson_CalculatedPlusUnavailable_CountsTruthful()
+    {
+        var (client, projectId) = await SetupCostProjectAsync("CostPartial");
+
+        var calculated = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(10, "m2", 10m, null, "USD", null, null));
+        calculated.StatusCode.Should().Be(HttpStatusCode.Created);
+        var unavailable = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(3, "m2", null, "unobtanium-m2", null, null, null));
+        unavailable.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var costs = doc.RootElement.GetProperty("costs");
+        costs.GetProperty("status").GetString().Should().Be("Calculated");
+        costs.GetProperty("calculatedTotal").GetDecimal().Should().Be(100m);
+        costs.GetProperty("currency").GetString().Should().Be("USD");
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(1);
+        costs.GetProperty("unavailableCount").GetInt32().Should().Be(1);
+        doc.RootElement.GetProperty("caveats").GetArrayLength().Should().BeGreaterThan(0);
     }
 
     [Fact]

@@ -30,7 +30,7 @@ public sealed class ReportGeneratorTests
             "HEAT-VEG-001", "HeatV01 sensitivities", "Calculated",
             ["MVP placeholder reference — pending engineering validation"],
             "High", null, "Unavailable", null)],
-        new ReportCostSection(1, 0, 100m, "USD"),
+        new ReportCostSection(1, 0, "Calculated", null, 100m, "USD"),
         ["Mean improved."], ["MVP estimates only."]);
 
     [Fact]
@@ -194,5 +194,99 @@ public sealed class ReportGeneratorTests
         rendered.Content.Should().Contain("—")
             .And.NotContain("[]")
             .And.NotContain("null");
+    }
+
+    [Fact]
+    public async Task Json_CalculatedCost_ExposesStatusAndTotal()
+    {
+        var rendered = await new JsonReportGenerator().GenerateAsync(Model());
+        using var doc = JsonDocument.Parse(rendered.Content);
+        var costs = doc.RootElement.GetProperty("costs");
+
+        costs.GetProperty("status").GetString().Should().Be("Calculated");
+        costs.GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedTotal").GetDecimal().Should().Be(100m);
+        costs.GetProperty("currency").GetString().Should().Be("USD");
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(1);
+        costs.GetProperty("unavailableCount").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Json_MixedCurrencyCost_StaysUnavailable_NoTotal()
+    {
+        var model = Model() with
+        {
+            Costs = new ReportCostSection(2, 0, "Unavailable",
+                "A combined total is unavailable because estimates use multiple currencies (EUR, USD); refusing to sum.",
+                null, null),
+        };
+
+        var rendered = await new JsonReportGenerator().GenerateAsync(model);
+        using var doc = JsonDocument.Parse(rendered.Content);
+        var costs = doc.RootElement.GetProperty("costs");
+
+        costs.GetProperty("status").GetString().Should().Be("Unavailable");
+        costs.GetProperty("reason").GetString().Should().Contain("multiple currencies");
+        costs.GetProperty("calculatedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("currency").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(2);
+        costs.GetProperty("unavailableCount").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Html_CalculatedCost_RendersTotal()
+    {
+        var rendered = await new HtmlReportGenerator().GenerateAsync(Model());
+
+        rendered.Content.Should().Contain("Calculated: 1 estimate(s), total 100 USD")
+            .And.Contain("Unavailable: 0")
+            .And.NotContain("best scenario")
+            .And.NotContain("winner");
+    }
+
+    [Fact]
+    public async Task Html_MixedCurrencyCost_RendersReason_NoGrandTotal()
+    {
+        var model = Model() with
+        {
+            Costs = new ReportCostSection(2, 0, "Unavailable",
+                "A combined total is unavailable because estimates use multiple currencies (EUR, USD); refusing to sum.",
+                null, null),
+        };
+
+        var rendered = await new HtmlReportGenerator().GenerateAsync(model);
+
+        rendered.Content.Should().Contain("multiple currencies")
+            .And.NotContain("160")
+            .And.NotContain("null")
+            .And.NotContain("best scenario")
+            .And.NotContain("Best scenario")
+            .And.NotContain("winner")
+            .And.NotContain("Winner");
+    }
+
+    [Fact]
+    public async Task Json_NoCalculatedEstimates_HonestlyUnavailable_NoFakeZero()
+    {
+        var model = Model() with
+        {
+            Costs = new ReportCostSection(0, 1, "Unavailable",
+                "Estimates exist but none have reliable prices.", null, null),
+        };
+
+        var rendered = await new JsonReportGenerator().GenerateAsync(model);
+        using var doc = JsonDocument.Parse(rendered.Content);
+        var costs = doc.RootElement.GetProperty("costs");
+
+        costs.GetProperty("status").GetString().Should().Be("Unavailable");
+        costs.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+        costs.GetProperty("calculatedTotal").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("currency").ValueKind.Should().Be(JsonValueKind.Null);
+        costs.GetProperty("calculatedCount").GetInt32().Should().Be(0);
+        costs.GetProperty("unavailableCount").GetInt32().Should().Be(1);
+
+        var html = await new HtmlReportGenerator().GenerateAsync(model);
+        html.Content.Should().Contain("Estimates exist but none have reliable prices.")
+            .And.NotContain("total 0 USD");
     }
 }
