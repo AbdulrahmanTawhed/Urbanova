@@ -2,6 +2,9 @@
 AI-powered Urban Climate & Site Intelligence Platform  
 Grow Cooler Cities, One Decision at a Time.
 
+[![CI](https://github.com/AbdulrahmanTawhed/Urbanova/actions/workflows/ci.yml/badge.svg)](https://github.com/AbdulrahmanTawhed/Urbanova/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 
 ## What is URBANOVA?
 URBANOVA helps real estate developers, consulting firms, and engineers analyze a site before and during design, and make design decisions based on data instead of experience or manual estimation alone.
@@ -35,27 +38,62 @@ The architecture is designed to extend without a rebuild:
 
 ## Backend (.NET 10 + SQL Server)
 
-[![CI](https://github.com/AbdulrahmanTawhed/Urbanova/actions/workflows/ci.yml/badge.svg)](https://github.com/AbdulrahmanTawhed/Urbanova/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
 Production-quality backend implementing the PRD workflow
 Project → File → Validation → Geometry → Analysis → Baseline/Alternative →
 Modify → Recalculate → Compare → Recommend → Cost → Report.
 
-> Status: **PRD v0.2 compliant** — configurable scenario catalog, evidence-backed
-> recommendations, traceable quantities; 219/219 tests green. See `docs/prd-v0.2.md`.
+> Status: **PRD v0.2 compliant + review fixes** — all modules built, **226/226 tests green**
+> (`dotnet test Urbanova.slnx`: 130 unit + 96 integration).
 > Every unresolved PRD requirement maps to an abstraction + configurable MVP
 > default documented in `docs/assumptions.md` (nothing hard-coded as final).
 
-Stack: .NET 10 (SDK pinned in `global.json`), ASP.NET Core Web API, OpenAPI + Scalar UI,
-EF Core 10 + SQL Server, ASP.NET Identity + JWT Bearer (access + rotating refresh),
-xUnit + FluentAssertions + WebApplicationFactory.
+### What was built, in order
 
-Layout: `src/Urbanova.Domain/` (dependency-free) · `src/Urbanova.Application/`
-(use cases, DTOs, validators) · `src/Urbanova.Infrastructure/` (EF Core, Identity,
-adapters) · `src/Urbanova.Api/` (controllers, auth, OpenAPI) · `tests/` · `docs/`.
+- **Phases 1–2 — Foundation:** Clean Architecture solution (`Domain`, `Application`,
+  `Infrastructure`, `Api`), SQL Server schema with 4 EF Core migrations
+  (`InitialCreate`, `AuthRefreshTokens`, `RecommendationPolygonIndex`,
+  `ConcurrencyGuards`), audit stamps, ownership + concurrency tokens.
+- **Phase 3 — Auth:** ASP.NET Identity + JWT Bearer (access + rotating refresh tokens
+  with reuse detection), `MustOwnProject` resource policy, secure-by-default
+  fallback authorization, RFC7807 error responses.
+- **Phase 4 — Projects:** full CRUD with sites/boundaries, owner-scoped listing +
+  pagination, optimistic concurrency, explicit child delete order.
+- **Phase 5 — Engineering files:** pluggable `IEngineeringFileProcessor` registry
+  (GeoJSON + reject-all-else stub), upload → detect → validate → metadata,
+  SHA-256 dedupe, size guards, local-disk storage behind an abstraction.
+- **Phase 6 — Geometry:** format-independent `NormalizedGeometry` (extract +
+  normalize), polygon areas + bounding boxes; analysis consumes only this type.
+- **Phase 7 — Heat analysis:** config-driven `HeatV01` engine, threshold
+  classification service, traceable `AnalysisRun` snapshots with `InputHash`
+  determinism (identical inputs replay the stored run).
+- **Phase 8 — Scenarios:** locked baselines inheriting run inputs, alternatives with
+  parameter merge, versioning, scenario-scoped re-analysis.
+- **Phase 9 — Comparison:** baseline-vs-alternative deltas, class transitions,
+  new-problem flags, rule-based trade-offs; cost/feasibility honestly Unavailable.
+- **Phase 10 — Recommendations:** explainable rule engine (Problem → Cause →
+  Intervention → Impact → Evidence → Cost → Feasibility), mandatory evidence
+  levels (never `Validated`), idempotent generate-and-store.
+- **Phase 11 — Cost estimation:** `Quantity × UnitPrice` core, file-backed price
+  catalog, `Unavailable` instead of invented prices, recommendation/scenario links
+  feeding the comparison cost dimension.
+- **Phase 12 — Reporting:** canonical JSON model + HTML renderer, decision-support
+  summary with caveats, versioned + hashed report rows, file download.
+- **Phases 13–14 — Testing & docs:** full PRD workflow as one executable test,
+  failure-scenario sweep, OpenAPI + Scalar UI, complete `docs/` reference.
+- **Review rounds:** fixed file-delete ordering, stack-trace loss, null guards,
+  silent classification defaults, casing, race-safe inserts (unique indexes +
+  retries), transactional deletes/registration, mixed-currency guard, HTML
+  encoding, extension allowlist.
+- **PRD v0.2 update:** configurable scenario-parameter catalog (3 approved keys +
+  bands + max-count cap, coded errors), `RecommendationRule` evidence registry
+  with seeded rules and `NO_EVIDENCE` blocking, traceable quantities
+  (`UserProvided`/`DerivedFromGeometry`), backfill migration for pre-v0.2 rows.
+- **Latest fix:** cost derivation now computes **geodesic m²** (spherical earth)
+  from re-extracted polygon rings instead of relabeling planar deg² — fixing the
+  zero-quantity bug on real-world-scale plots; non-EPSG:4326 and zero-rounding
+  cases reject instead of storing 0.
 
-### Backend setup
+### Setup
 
 Prerequisites: .NET 10 SDK, SQL Server LocalDB (`sqllocaldb start MSSQLLocalDB`).
 
@@ -84,4 +122,5 @@ not market data**. Uploads (`AppData/uploads/`) and rendered reports
 - `docs/known-limitations.md` — gaps and future work
 - `docs/open-validations.md` — 11 unresolved PRD items awaiting sign-off
 - `docs/phase-01.md` … `docs/phase-14.md` — per-phase build + verification logs
+- `docs/prd-v0.2.md` — v0.2 change log and decisions
 - `docs/review-fixes.md` — post-review correctness/concurrency fixes + regression tests
