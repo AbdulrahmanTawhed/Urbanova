@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace Urbanova.Application.Recommendations;
 
-/// <summary>Recommendation DTOs (Phase 10). Cost links in Phase 11 — until then an honest Unavailable.</summary>
+/// <summary>Recommendation DTOs (Phase 10). Cost is a truthful two-field summary of the
+/// persisted linked estimate (Phase 11): Calculated when linked, otherwise honest Unavailable.</summary>
 public sealed record RecommendationCostDto(string Status, string? Reason);
 
 public sealed record RecommendationResponse(
