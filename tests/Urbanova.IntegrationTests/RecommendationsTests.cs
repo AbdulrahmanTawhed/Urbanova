@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Urbanova.Application.Analysis;
 using Urbanova.Application.Auth;
+using Urbanova.Application.Costing;
 using Urbanova.Application.EngineeringFiles;
 using Urbanova.Application.Projects;
 using Urbanova.Application.Recommendations;
@@ -99,6 +100,37 @@ public sealed class RecommendationsTests : IAsyncLifetime
         var recs2 = (await second.Content.ReadFromJsonAsync<RecommendationResponse[]>())!;
         recs2.Should().HaveCount(1, "deterministic regeneration is idempotent in content");
         recs2[0].Intervention.Should().Be(rec.Intervention);
+    }
+
+    [Fact]
+    public async Task RepeatedRetrieval_PreservesCostLink_AndStableIds()
+    {
+        var (client, projectId, file) = await SetupWithFileAsync();
+        await client.PostAsJsonAsync($"/api/projects/{projectId}/analysis",
+            new AnalyzeRequest(file.Id, []));
+
+        var first = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var rec = first.Should().ContainSingle().Subject;
+
+        var cost = await client.PostAsJsonAsync($"/api/projects/{projectId}/cost-estimates",
+            new CreateCostEstimateRequest(100, "m2", 8.50m, null, "USD", rec.Id, null));
+        cost.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var second = (await client.GetFromJsonAsync<RecommendationResponse[]>(
+            $"/api/projects/{projectId}/recommendations"))!;
+        var again = second.Should().ContainSingle().Subject;
+        again.Id.Should().Be(rec.Id, "retrieval must be non-destructive for an immutable run");
+        again.Intervention.Should().Be(rec.Intervention);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.Recommendations.SingleAsync(r => r.Id == rec.Id);
+            row.CostEstimateId.Should().NotBeNull("repeated GET must not orphan the linked estimate");
+            var estimate = await db.CostEstimates.SingleAsync(e => e.Total == 850m && e.ProjectId == projectId);
+            estimate.RecommendationId.Should().Be(rec.Id);
+        }
     }
 
     [Fact]

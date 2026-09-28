@@ -11,8 +11,9 @@ namespace Urbanova.Infrastructure.Recommendations;
 
 /// <summary>
 /// Generate-and-store recommendations (Phase 10). Run resolution: explicit runId, else the
-/// project's latest succeeded run. Existing rows for the run are replaced atomically —
-/// deterministic rules make regeneration idempotent.
+/// project's latest succeeded run. Rows are generated once per immutable run and then
+/// returned as-is — deterministic rules make generation idempotent, and stable rows keep
+/// identities and linked CostEstimates intact across repeated reads and reports.
 /// </summary>
 public sealed class RecommendationService(AppDbContext db, IRecommendationEngine engine) : IRecommendationService
 {
@@ -48,6 +49,18 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
         if (run.Status != AnalysisStatus.Succeeded || run.Result is null)
             throw RecommendationException.NoAnalysis();
 
+        // Idempotent read: AnalysisRuns are immutable, so rows already stored for
+        // this run are the answer. Returning them preserves Recommendation identities
+        // and linked CostEstimates (a delete/recreate would orphan estimates through
+        // the SET NULL FKs and churn ids on every read and every report).
+        var existing = await db.Recommendations
+            .Where(r => r.AnalysisRunId == run.Id)
+            .Include(r => r.RecommendationRule)
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync(ct);
+        if (existing.Count > 0)
+            return [.. existing.Select(ToResponse)];
+
         var values = JsonSerializer.Deserialize<List<Application.Analysis.AreaValueDto>>(
                 run.Result.ValuesJson, JsonOptions) ?? [];
         var parameters = ExtractParameters(run.InputSnapshotJson);
@@ -72,35 +85,45 @@ public sealed class RecommendationService(AppDbContext db, IRecommendationEngine
             rules[code] = rule;
         }
 
-        // Idempotent refresh: replace this run's rows atomically — concurrent readers
-        // never see an empty set and concurrent writers cannot interleave duplicates.
-        // Runs inside the execution strategy (EnableRetryOnFailure forbids raw transactions).
+        // Insert-only generation: rows are created once per immutable run and never
+        // replaced, so identities and cost links stay stable across repeated reads
+        // and reports. Runs inside the execution strategy (EnableRetryOnFailure
+        // forbids raw transactions); re-checks inside the transaction to narrow the
+        // concurrent first-writer window — under ReadCommitted this reduces but does
+        // not eliminate a simultaneous first-write race (see follow-up: unique
+        // constraint on (AnalysisRunId, PolygonIndex)).
         var strategy = db.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await db.Recommendations.Where(r => r.AnalysisRunId == run.Id).ExecuteDeleteAsync(ct);
-            foreach (var g in generated)
+            var current = await db.Recommendations
+                .Where(r => r.AnalysisRunId == run.Id)
+                .Select(r => r.Id)
+                .ToListAsync(ct);
+            if (current.Count == 0)
             {
-                db.Recommendations.Add(new Recommendation
+                foreach (var g in generated)
                 {
-                    ProjectId = projectId,
-                    AnalysisRunId = run.Id,
-                    ScenarioId = run.ScenarioId,
-                    RecommendationRuleId = rules[g.RuleCode].Id,
-                    Problem = g.Problem,
-                    Cause = g.Cause,
-                    Intervention = g.Intervention,
-                    ExpectedImpactJson = JsonSerializer.Serialize(g.ExpectedImpact, JsonOptions),
-                    EvidenceSource = g.EvidenceSource,
-                    EvidenceLevel = g.EvidenceLevel,
-                    PolygonIndex = g.PolygonIndex,
-                    Feasibility = g.Feasibility,
-                    Confidence = g.Confidence,
-                    CreatedBy = ownerId,
-                });
+                    db.Recommendations.Add(new Recommendation
+                    {
+                        ProjectId = projectId,
+                        AnalysisRunId = run.Id,
+                        ScenarioId = run.ScenarioId,
+                        RecommendationRuleId = rules[g.RuleCode].Id,
+                        Problem = g.Problem,
+                        Cause = g.Cause,
+                        Intervention = g.Intervention,
+                        ExpectedImpactJson = JsonSerializer.Serialize(g.ExpectedImpact, JsonOptions),
+                        EvidenceSource = g.EvidenceSource,
+                        EvidenceLevel = g.EvidenceLevel,
+                        PolygonIndex = g.PolygonIndex,
+                        Feasibility = g.Feasibility,
+                        Confidence = g.Confidence,
+                        CreatedBy = ownerId,
+                    });
+                }
+                await db.SaveChangesAsync(ct);
             }
-            await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
         });
 

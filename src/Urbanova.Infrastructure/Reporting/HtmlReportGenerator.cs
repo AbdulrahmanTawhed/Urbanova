@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Urbanova.Domain;
 using Urbanova.Domain.Reporting;
 
@@ -61,9 +62,9 @@ public sealed class HtmlReportGenerator : IReportGenerator
 
         Section(h, "Recommendations", model.Recommendations.Count == 0
             ? "<p class=\"muted\">No recommendations for the latest analysis.</p>"
-            : Table(["Area", "Problem", "Intervention", "Evidence", "Feasibility"],
-                model.Recommendations.Select(r => new[]
-                    { r.PolygonIndex.ToString(), r.Problem, r.Intervention, r.EvidenceLevel, r.Feasibility ?? "—" })));
+            : string.Concat(model.Recommendations
+                .OrderBy(r => r.PolygonIndex)
+                .Select(RenderRecommendation)));
 
         Section(h, "Estimated cost",
             $"<p>Calculated: {model.Costs.CalculatedCount} estimate(s), total {model.Costs.CalculatedTotal} {E(model.Costs.Currency)} · " +
@@ -82,6 +83,90 @@ public sealed class HtmlReportGenerator : IReportGenerator
     {
         h.Append("<h2>").Append(E(title)).Append("</h2>").Append(body);
     }
+
+    // One compact card per recommendation: avoids an excessively wide table while
+    // exposing the full chain (problem → cause → intervention → impact → rule /
+    // evidence → feasibility → real cost status). Deterministic (caller orders),
+    // every value encoded, missing optionals shown honestly as "—".
+    private static string RenderRecommendation(ReportRecommendationSection r)
+    {
+        var h = new StringBuilder("<div>");
+        h.Append("<h3>").Append(E($"Area {r.PolygonIndex}")).Append("</h3>");
+        h.Append("<p><strong>Problem:</strong> ").Append(E(r.Problem)).Append("</p>");
+        h.Append("<p><strong>Cause:</strong> ").Append(E(Fallback(r.Cause))).Append("</p>");
+        h.Append("<p><strong>Intervention:</strong> ").Append(E(r.Intervention)).Append("</p>");
+        h.Append("<p><strong>Expected impact:</strong> ").Append(E(FormatImpact(r.ExpectedImpact))).Append("</p>");
+        h.Append("<p><strong>Rule:</strong> ").Append(E(Fallback(r.RuleCode)))
+            .Append(" · <strong>Evidence:</strong> ").Append(E(FormatEvidence(r))).Append("</p>");
+        h.Append("<p><strong>Feasibility:</strong> ").Append(E(Fallback(r.Feasibility)))
+            .Append(" · <strong>Cost:</strong> ").Append(E(FormatCost(r))).Append("</p>");
+        h.Append("<p><strong>References:</strong> ").Append(E(FormatReferences(r.ScientificReferences))).Append("</p>");
+        return h.Append("</div>").ToString();
+    }
+
+    private static string Fallback(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private static string FormatEvidence(ReportRecommendationSection r) =>
+        string.IsNullOrWhiteSpace(r.EvidenceSource) ? r.EvidenceLevel : $"{r.EvidenceSource} ({r.EvidenceLevel})";
+
+    // Structured impact stays structured in JSON; HTML shows a one-line reading of
+    // the stored predictedDeltaC / targetClassification / basis — never invented.
+    private static string FormatImpact(JsonElement? impact)
+    {
+        if (impact is null)
+            return "—";
+        try
+        {
+            var el = impact.Value;
+            if (el.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                return "—";
+            if (el.ValueKind == JsonValueKind.Object)
+            {
+                var delta = el.TryGetProperty("predictedDeltaC", out var d) ? d.ToString() : null;
+                var target = el.TryGetProperty("targetClassification", out var t)
+                    && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                var basis = el.TryGetProperty("basis", out var b)
+                    && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+                if (delta is null && target is null && basis is null)
+                    return el.ToString();
+                var sb = new StringBuilder();
+                if (delta is not null)
+                    sb.Append('Δ').Append(' ').Append(delta).Append("°C");
+                if (target is not null)
+                {
+                    if (sb.Length > 0)
+                        sb.Append(" → ");
+                    sb.Append(target);
+                }
+                if (basis is not null)
+                {
+                    if (sb.Length > 0)
+                        sb.Append(' ');
+                    sb.Append('(').Append(basis).Append(')');
+                }
+                return sb.Length == 0 ? "—" : sb.ToString();
+            }
+            var raw = el.ToString();
+            return string.IsNullOrWhiteSpace(raw) ? "—" : raw;
+        }
+        catch
+        {
+            return "—";
+        }
+    }
+
+    private static string FormatCost(ReportRecommendationSection r)
+    {
+        if (r.Cost is not null && r.CostStatus == "Calculated")
+            return $"Calculated — {r.Cost.Total} {Fallback(r.Cost.Currency)} " +
+                   $"({r.Cost.Quantity} {Fallback(r.Cost.Unit)} × {r.Cost.UnitPrice}, " +
+                   $"{Fallback(r.Cost.QuantitySource)}, {Fallback(r.Cost.PriceSource)})";
+        return "Unavailable";
+    }
+
+    private static string FormatReferences(IReadOnlyList<string>? references) =>
+        references is null || references.Count == 0 ? "—" : string.Join("; ", references);
 
     private static string Unavailable(ReportSectionStatus s) =>
         $"<p class=\"muted\">Unavailable — {E(s.Reason ?? "no data")}.</p>";
