@@ -33,9 +33,9 @@ jobs:
       - name: Unit tests
         run: dotnet test tests/Urbanova.UnitTests --no-build --nologo -v minimal
 
-      # Integration tests need SQL Server. GitHub-hosted runners cannot use LocalDB,
-      # so point ConnectionStrings__UrbanovaDb at a real instance. Example with a
-      # service container (uncomment + adapt):
+      # Integration tests need SQL Server. windows-latest provides LocalDB, which the
+      # step below uses. On runners without LocalDB, point ConnectionStrings__UrbanovaDb
+      # at a real instance instead. Example with a service container (uncomment + adapt):
       #
       # services:
       #   sqlserver:

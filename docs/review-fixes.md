@@ -59,3 +59,9 @@ addressed below. Verification: `dotnet test` → Unit 114/114, Integration 86/86
 
 `CanProcess` null matrix, unknown-classification throw, case-insensitive statuses,
 table no-double-encoding, mixed-currency comparison, parent+run param merge.
+
+> Current state (post-PR #7; history above retained): recommendation persistence is
+> insert-only per immutable run — stable identities with preserved cost links now supersede
+> the delete+insert refresh described in Round 1 item 6; `NO_EVIDENCE` (422) guards the
+> evidence registry and mixed-currency totals are refused in both comparison and reports.
+> Current suite: 265/265 (145 unit + 120 integration, 0 failed, 0 skipped).

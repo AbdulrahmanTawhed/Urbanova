@@ -33,3 +33,9 @@ a band-edge bug mid-phase (35.0 predicted as Moderate) — fixed with strict-exi
 
 `IPriceCatalog` (file-backed MVP), Qty × Price service, `POST /api/projects/{id}/cost-estimates`,
 Unavailable instead of invented prices, links to recommendations/scenarios.
+
+> Current state (post-PR #7, historical counts above retained): recommendations keep stable
+> identity per immutable run (insert-only, cost links preserved); unknown/inactive rules block
+> with `NO_EVIDENCE` (422, nothing stored); feasibility is a labeled heuristic independent of
+> later cost links; responses carry the truthful linked-cost summary (`Calculated` when linked,
+> otherwise `Unavailable`). Current suite: 265/265 (145 unit + 120 integration).

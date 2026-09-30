@@ -40,3 +40,10 @@ catch: Acceptable latest runs correctly yield zero recs (fixture adjusted, engin
 ## Next (Phase 13 — Testing)
 
 Full-workflow integration test (Project → Report per PRD §23) + failure-scenario sweep.
+
+> Current state (post-PR #7, historical counts above retained): reports carry full
+> recommendation traceability with real linked costs, mixed-currency-safe aggregates, and
+> reference-only spatial identity (`polygonIndexBase: 0`; `sourceEngineeringFileId` survives
+> deletion while `liveEngineeringFileId` nulls; evaluated-empty runs keep context with count 0;
+> displayed analysis and comparison sides are separate references; no embedded geometry or maps).
+> Current suite: 265/265 (145 unit + 120 integration).

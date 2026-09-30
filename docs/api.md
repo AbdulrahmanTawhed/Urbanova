@@ -85,7 +85,7 @@ do not create a feasibility verdict.
 
 | Method | Route | Success | Errors |
 |---|---|---|---|
-| GET | `/api/projects/{id}/recommendations?runId=` (default: latest succeeded run) | 200 RecommendationResponse[] `{problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility, confidence: null, scientificReferences[], cost: Unavailable}` | 400 no analysis, 401/403/404, 422 NO_EVIDENCE (rule unknown/inactive; nothing stored) |
+| GET | `/api/projects/{id}/recommendations?runId=` (default: latest succeeded run) | 200 RecommendationResponse[] `{problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility, confidence: null, scientificReferences[], cost: {Calculated when linked | Unavailable} truthful summary}` | 400 no analysis, 401/403/404, 422 NO_EVIDENCE (rule unknown/inactive; nothing stored) |
 
 Evidence is Calculated (problem) / Estimated (preventive) — never Validated.
 
