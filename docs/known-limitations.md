@@ -37,4 +37,4 @@
 - Single analysis engine registered (no multi-engine dispatch); single-level scenario inheritance.
 - Comparison requires identical polygon counts; reports always use the latest run.
 - `PUT /api/projects/{id}` replaces site fields wholesale when `site` is provided.
-- Transitive NU1903 advisory (`System.Security.Cryptography.Xml 9.0.0` via EF Design) — build-only tooling, not shipped.
+- Dependency audit clean: EF Core packages serviced to 10.0.12; NuGet Audit reports no vulnerable packages from configured sources (previously transitive `System.Security.Cryptography.Xml 9.0.0` via EF Design).
