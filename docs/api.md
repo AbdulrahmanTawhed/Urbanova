@@ -118,6 +118,27 @@ Report `costs` is a project-wide aggregate over Calculated estimates:
 `Unavailable` with `reason` and null total/currency — never a cross-currency sum,
 never `0 USD`. No currency conversion exists in the MVP.
 
+Report `spatialReferences` is reference-only spatial identity (no coordinates,
+rings, GeoJSON, images, or maps): `{polygonIndexBase, displayedAnalysis,
+recommendationContext, comparisonBaseline?, comparisonAlternative?}`. Each run
+reference carries `{scenarioId?, analysisRunId, sourceEngineeringFileId?,
+liveEngineeringFileId?, inputHash, geometryHash?, fileHash?, geometryCrs?,
+polygonCount, retrieval {method, relativePath, requiresSourceFile}}`;
+`recommendationContext` records `{recommendationAnalysisRunId,
+sameAsDisplayedAnalysis, recommendationCount}` instead of duplicating the block
+and exists with count 0 when evaluation produced no rows.
+`sourceEngineeringFileId` is the historical snapshot identity (survives source
+deletion); `liveEngineeringFileId` is the current FK (null after deletion).
+`polygonIndexBase` is 0 (positional over the extraction polygon array).
+Resolution chain: report `analysisRunId` → `GET /api/analysis/{runId}` (yields
+`fileId`) → `POST /api/files/{fileId}/extract-geometry` (yields CRS, rings, and
+polygons in index order; owner-scoped; requires the source file). Baseline and
+alternative have separate references (comparison checks polygon counts, not
+identical hashes). `geometryCrs` is null when not persisted — `Site.Crs` is never
+substituted. `GeometryResponse` exposes no hash, so endpoint hash comparison
+requires a future additive change. Numeric report content stays readable and
+immutable after source-file deletion; live geometry retrieval may then 404.
+
 ## System
 
 | Method | Route | Auth | Notes |

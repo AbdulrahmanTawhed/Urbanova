@@ -262,6 +262,9 @@ public sealed class ReportService(
             decision.Add($"Estimated total unavailable: {costSummary.Reason}");
         }
 
+        var spatialReferences = await BuildSpatialReferencesAsync(
+            project.Id, run, values.Count, recRows.Count, comparisonResult, ct);
+
         return new ReportModel(
             new ReportProjectSection(project.Id, project.Name, project.Description,
                 project.Status.ToString(), now),
@@ -308,7 +311,94 @@ public sealed class ReportService(
                     status, cost);
             })],
             costSummary,
+            spatialReferences,
             decision, caveats);
+    }
+
+    /// <summary>
+    /// PolygonIndex convention proven by <c>HeatV01Engine</c>: positional,
+    /// zero-based over the extracted polygon list (no sorting anywhere in the path).
+    /// </summary>
+    private const int PolygonIndexBase = 0;
+
+    /// <summary>
+    /// Reference-only spatial identity over already-selected runs. Displayed analysis
+    /// comes from the project-latest run already loaded; comparison sides reuse the
+    /// exact run IDs ComparisonService selected (one batched load, no reselection).
+    /// Snapshot JSON parses defensively: missing or malformed optional fields stay
+    /// null instead of invented. No geometry is re-extracted here.
+    /// </summary>
+    private async Task<ReportSpatialReferences> BuildSpatialReferencesAsync(
+        Guid projectId, AnalysisRun? run, int displayedPolygonCount, int recommendationCount,
+        ComparisonResponse? comparisonResult, CancellationToken ct)
+    {
+        var displayed = run is null ? null : BuildRunReference(run, displayedPolygonCount, run.ScenarioId);
+        // Evaluated-empty is still context: the run was evaluated even when it
+        // produced zero rows. Only a missing displayed run yields null context.
+        var recommendationContext = displayed is null ? null
+            : new ReportRecommendationSpatialContext(
+                run!.Id, run.Id == displayed.AnalysisRunId, recommendationCount);
+
+        ReportRunSpatialReference? baselineRef = null, alternativeRef = null;
+        if (comparisonResult is not null)
+        {
+            var wanted = new[] { comparisonResult.Baseline.RunId, comparisonResult.Alternative.RunId }
+                .Distinct().ToList();
+            var runs = await db.AnalysisRuns
+                .Where(r => r.ProjectId == projectId && wanted.Contains(r.Id))
+                .Include(r => r.Result)
+                .ToListAsync(ct);
+            var byId = runs.ToDictionary(r => r.Id);
+            // Sides are labeled by the requested scenario, not the run's own
+            // ScenarioId: a baseline created FROM a direct run compares through a
+            // run whose ScenarioId is null.
+            if (byId.TryGetValue(comparisonResult.Baseline.RunId, out var baseRun))
+                baselineRef = BuildRunReference(
+                    baseRun, ReadValues(baseRun).Count, comparisonResult.Baseline.ScenarioId);
+            if (byId.TryGetValue(comparisonResult.Alternative.RunId, out var altRun))
+                alternativeRef = BuildRunReference(
+                    altRun, ReadValues(altRun).Count, comparisonResult.Alternative.ScenarioId);
+        }
+
+        return new ReportSpatialReferences(
+            PolygonIndexBase, displayed, recommendationContext, baselineRef, alternativeRef);
+    }
+
+    private static ReportRunSpatialReference BuildRunReference(
+        AnalysisRun run, int polygonCount, Guid? scenarioId)
+    {
+        var (sourceFileId, geometryHash, fileHash) = ReadSnapshotIdentity(run.InputSnapshotJson);
+        return new ReportRunSpatialReference(
+            scenarioId, run.Id, sourceFileId, run.EngineeringFileId, run.InputHash,
+            geometryHash, fileHash, GeometryCrs: null,
+            polygonCount,
+            new ReportGeometryRetrieval(
+                "POST", "/api/files/{fileId}/extract-geometry", RequiresSourceFile: true));
+    }
+
+    /// <summary>
+    /// Reads the camelCase keys written by <c>AnalysisService</c> (<c>fileId</c>,
+    /// <c>geometryHash</c>, <c>fileHash</c>). <c>fileId</c> must parse as a Guid;
+    /// missing, malformed, non-string, or invalid values yield nulls, never guesses.
+    /// </summary>
+    private static (Guid? SourceFileId, string? GeometryHash, string? FileHash) ReadSnapshotIdentity(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return (null, null, null);
+            static string? Get(JsonElement root, string name) =>
+                root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
+                    ? el.GetString() : null;
+            var fileId = Get(doc.RootElement, "fileId");
+            return (fileId is not null && Guid.TryParse(fileId, out var parsed) ? parsed : null,
+                Get(doc.RootElement, "geometryHash"), Get(doc.RootElement, "fileHash"));
+        }
+        catch (JsonException)
+        {
+            return (null, null, null);
+        }
     }
 
     /// <summary>

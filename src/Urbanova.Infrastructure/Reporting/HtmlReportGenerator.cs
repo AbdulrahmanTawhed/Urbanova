@@ -75,6 +75,8 @@ public sealed class HtmlReportGenerator : IReportGenerator
                   $"Unavailable: {model.Costs.UnavailableCount}</p>" +
                   Unavailable(new ReportSectionStatus("Unavailable", model.Costs.Reason)));
 
+        Section(h, "Spatial references", RenderSpatialReferences(model.SpatialReferences));
+
         Section(h, "Decision-support summary",
             "<ul>" + string.Concat(model.DecisionSummary.Select(s => $"<li>{E(s)}</li>")) + "</ul>" +
             "<div class=\"warn\"><strong>Caveats</strong><ul>" +
@@ -88,6 +90,48 @@ public sealed class HtmlReportGenerator : IReportGenerator
     {
         h.Append("<h2>").Append(E(title)).Append("</h2>").Append(body);
     }
+
+    // Reference-only spatial identity: run/file/hash ids plus retrieval metadata.
+    // Text only — no coordinates, rings, GeoJSON, SVG, canvas, or embedded map.
+    // Every value is encoded at the call site; missing optionals render honestly.
+    private static string RenderSpatialReferences(ReportSpatialReferences refs)
+    {
+        var h = new StringBuilder();
+        h.Append("<p>Polygon index base: ").Append(E(refs.PolygonIndexBase.ToString())).Append("</p>");
+        h.Append("<p><strong>Displayed analysis:</strong> ")
+            .Append(E(DescribeRun(refs.DisplayedAnalysis) ?? "No succeeded analysis in this report.")).Append("</p>");
+        h.Append("<p><strong>Recommendations:</strong> ")
+            .Append(E(refs.RecommendationContext is null
+                ? "No succeeded analysis context for recommendations in this report."
+                : refs.RecommendationContext.RecommendationCount == 0
+                    ? $"Evaluated run {refs.RecommendationContext.RecommendationAnalysisRunId}: " +
+                      "zero recommendations produced."
+                    : $"Same run as displayed analysis " +
+                      $"({refs.RecommendationContext.RecommendationAnalysisRunId}), " +
+                      $"{refs.RecommendationContext.RecommendationCount} recommendation(s)."))
+            .Append("</p>");
+        h.Append("<p><strong>Comparison baseline:</strong> ")
+            .Append(E(DescribeRun(refs.ComparisonBaseline) ?? "No valid comparison in this report.")).Append("</p>");
+        h.Append("<p><strong>Comparison alternative:</strong> ")
+            .Append(E(DescribeRun(refs.ComparisonAlternative) ?? "No valid comparison in this report.")).Append("</p>");
+        h.Append("<p class=\"muted\">")
+            .Append(E("Reference-only spatial identity: resolve polygons via POST " +
+                "/api/files/{fileId}/extract-geometry while the source file remains available. " +
+                "Report numbers stay readable if the file is later deleted."))
+            .Append("</p>");
+        return h.ToString();
+    }
+
+    private static string? DescribeRun(ReportRunSpatialReference? r) =>
+        r is null ? null :
+        $"run {r.AnalysisRunId}, " +
+        $"source file {r.SourceEngineeringFileId?.ToString() ?? Missing()}, " +
+        $"live file {r.LiveEngineeringFileId?.ToString() ?? "unavailable (deleted)"}, " +
+        $"input {r.InputHash}, geometry {r.GeometryHash ?? Missing()}, " +
+        $"polygons {r.PolygonCount}, CRS {r.GeometryCrs ?? "not persisted"}, " +
+        $"via {r.Retrieval.Method} {r.Retrieval.RelativePath}";
+
+    private static string Missing() => "—";
 
     // One compact card per recommendation: avoids an excessively wide table while
     // exposing the full chain (problem → cause → intervention → impact → rule /

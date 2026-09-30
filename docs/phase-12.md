@@ -19,6 +19,11 @@
 - Reports generate on empty projects with Unavailable sections (snapshot, not 400).
 - Recommendation resolution reuses the idempotent service (benign refresh side effect).
 - Unknown formats → 400; PDF deferred.
+- Reports carry reference-only spatial identity (`spatialReferences`: displayed
+  analysis, recommendation context, separate Baseline/Alternative sides with run,
+  file, and hash references plus retrieval metadata). No coordinates, geometry,
+  or maps are embedded; Analysis and Comparison may describe different runs by
+  design (project-latest vs requested pair).
 
 ## Verified
 
