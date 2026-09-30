@@ -28,9 +28,9 @@ evidence-based recommendations, cost estimation, and reporting.
 - Reviewers evaluating the system's design and implementation quality.
 - Frontend clients consuming the REST API (see [API Overview](#6-api-overview)).
 
-> Status: **PRD v0.2 compliant** — all modules built, **226/226 tests green**
-> (130 unit + 96 integration). Every unresolved PRD requirement maps to an abstraction
-> plus a configurable MVP default documented in `docs/assumptions.md`.
+> Status: **PRD v0.2 compliant, MVP Backend ready with documented limitations** — all modules built, **265/265 tests green**
+> (145 unit + 120 integration, 0 failed, 0 skipped). Every unresolved PRD requirement maps to an abstraction
+> plus a configurable MVP default documented in `docs/assumptions.md`. Placeholders are estimates, never validated facts.
 
 ---
 
@@ -289,7 +289,7 @@ Response: 200 ComparisonResponse (cost dimension `Unavailable` on mixed currenci
 ```text
 GET   /api/projects/{projectId}/recommendations?runId={id}
 Purpose: rule-based recs for a run (default: latest succeeded)   Authentication: JWT
-Response: 200 RecommendationResponse[] {problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility (heuristic High/Medium/Low — not validated, cost-independent), confidence: null, scientificReferences[], cost: Unavailable} / 400 no analysis / 422 NO_EVIDENCE / 403 / 404
+Response: 200 RecommendationResponse[] {problem, cause, intervention, expectedImpact, ruleCode, evidenceSource, evidenceLevel, feasibility (heuristic High/Medium/Low — not validated, cost-independent), confidence: null, scientificReferences[], cost: {Calculated when linked | Unavailable} truthful summary} / 400 no analysis / 422 NO_EVIDENCE / 403 / 404
 ```
 
 ### Costing — `CostEstimatesController` (`api`)
@@ -318,6 +318,12 @@ Response: 200 / 403 / 404
 
 GET   /api/reports/{reportId}/file    Purpose: download rendered HTML   Authentication: JWT
 Response: 200 text/html / 404 (JSON reports have no file)
+
+Reports carry reference-only spatial identity only (no coordinates, GeoJSON, SVG, or maps;
+`polygonIndexBase: 0`; `sourceEngineeringFileId` survives deletion while `liveEngineeringFileId`
+nulls; geometry resolves via `POST /api/files/{fileId}/extract-geometry` while the source file
+exists). Summaries are neutral decision support — no best-scenario/winner selection, no currency
+conversion, mixed currencies refuse totals. Full contract: `docs/api.md`.
 
 GET   /health/live, /health/ready     Purpose: liveness + DB readiness   Authentication: none
 GET   /api/system/info                Purpose: build/env metadata   Authentication: none
@@ -628,7 +634,7 @@ Never commit real credentials.
 | `tests/Urbanova.IntegrationTests` (17 files) | Full HTTP + LocalDB coverage per module, end-to-end workflow, failure sweep | `dotnet test tests/Urbanova.IntegrationTests` |
 
 ```bash
-dotnet test Urbanova.slnx   # everything: 226/226 green (130 unit + 96 integration)
+dotnet test Urbanova.slnx   # everything: 265/265 green (145 unit + 120 integration, 0 failed, 0 skipped)
 ```
 
 Important scenarios covered: auth + refresh rotation/reuse, ownership 403/404
@@ -667,13 +673,20 @@ secrets, `bin/`, `obj/`, uploads, or rendered reports.
 
 ## 18. Current Status
 
-**Implemented**
+**Implemented — MVP Backend ready with documented limitations**
 - Auth (register/login/refresh/me), project CRUD + sites, file upload/validate/
   geometry extraction, heat analysis + classification, locked baselines,
-  inheriting alternatives + re-analysis, comparison, rule-based recommendations
-  with evidence registry, cost estimation (direct/catalog/derived), JSON + HTML
-  reports, health checks, OpenAPI/Scalar docs.
-- 6 migrations, 200+ automated tests, CI workflow.
+  inheriting alternatives + parameter editing + re-analysis, environmental comparison
+  with pair-specific cost totals, rule-based (non-AI) recommendations with evidence
+  registry and truthful linked-cost status, cost estimation (direct/catalog/derived,
+  mixed-currency refusal), JSON + HTML reports with neutral Decision-Support Summary,
+  heuristic recommendation feasibility (comparison feasibility stays Unavailable), and
+  reference-only spatial identity (separate displayed-analysis and comparison contexts;
+  source-file identity survives deletion, live link nulls), health checks, OpenAPI/Scalar docs.
+- 6 migrations, 265 automated tests green (145 unit + 120 integration), CI workflow.
+- The engineer remains the final decision-maker: no validated measurements, market prices,
+  engineering feasibility verdict, embedded maps, PDF output, currency conversion, or
+  best-scenario selection is claimed.
 
 **In Progress**
 - Nothing structural open — active work is validation-driven replacement of MVP

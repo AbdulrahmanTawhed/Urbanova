@@ -36,3 +36,10 @@ New tests: `PriceCatalogTests` (7: hit/case/miss/missing/malformed/validators) +
 
 `IReportGenerator` (JSON canonical + HTML), decision-support summary,
 `POST /api/projects/{id}/reports` + `GET /api/reports/{id}`.
+
+> Current state (post-PR #7, historical counts above retained): quantities are traceable
+> (`UserProvided`/`DerivedFromGeometry` from analyzed polygon geodesic m² for area units);
+> second estimates on an already-linked recommendation are rejected; cross-project references
+> return 404; pair-specific comparison totals and project-wide report aggregates both refuse
+> mixed-currency sums (`Unavailable` + reason, never a cross-currency total or `0 USD`).
+> Current suite: 265/265 (145 unit + 120 integration).
