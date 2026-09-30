@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -100,6 +101,26 @@ public sealed class GeometryTests : IAsyncLifetime
         geo.TotalArea.Should().BeApproximately(4.0, 1e-9);
         geo.PolygonCount.Should().Be(1);
         geo.Polygons[0].Area.Should().BeApproximately(4.0, 1e-9);
+    }
+
+    [Fact]
+    public async Task Extract_Twice_PreservesPolygonOrder()
+    {
+        // PolygonIndex is positional over this array (HeatV01Engine): order stability
+        // across extractions is the prerequisite for index-based report mapping.
+        var (client, projectId) = await SetupAsync();
+        var file = await UploadAsync(client, projectId, SquareGeoJson);
+
+        var first = (await (await client.PostAsync(
+            $"/api/files/{file.Id}/extract-geometry", null))
+            .Content.ReadFromJsonAsync<GeometryResponse>())!;
+        var second = (await (await client.PostAsync(
+            $"/api/files/{file.Id}/extract-geometry", null))
+            .Content.ReadFromJsonAsync<GeometryResponse>())!;
+
+        second.PolygonCount.Should().Be(first.PolygonCount).And.BeGreaterThan(0);
+        JsonSerializer.Serialize(second.Polygons).Should().Be(
+            JsonSerializer.Serialize(first.Polygons));
     }
 
     [Fact]

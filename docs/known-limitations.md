@@ -19,6 +19,13 @@
   the final assessment remains the engineer's responsibility.
 - Derived quantities use spherical-earth areas (~0.3% off the WGS84 ellipsoid);
   non-EPSG:4326 geometries and sub-centimeter rounded areas are rejected, not stored.
+- Reports are reference-only for spatial identity: no embedded coordinates, rings,
+  GeoJSON, images, or maps — only run/file/hash references plus retrieval metadata.
+  Source file identity survives deletion as historical snapshot data while the live
+  file link nulls; recommendation context exists with count 0 for evaluated-empty runs.
+  Live geometry resolution needs the source file; deleted sources break retrieval
+  (404) while stored report numbers stay immutable. Geometry CRS is not persisted
+  per run, and `GeometryResponse` exposes no comparable hash.
 
 ## Engineering gaps (future work, not PRD blockers)
 

@@ -16,7 +16,7 @@ on Reports) + `PrdV02_EvidenceAndQuantity` (PRD v0.2: `RecommendationRules` + se
 | `Projects` | `Id` | — | `OwnerId` idx, `(OwnerId, Name)` idx, `RowVersion`, `Status int` |
 | `Sites` | `Id` | `ProjectId unique 1:1 CASCADE` | `BoundaryGeoJson nvarchar(max)`, `Crs` default `EPSG:4326` |
 | `EngineeringFiles` | `Id` | `ProjectId RESTRICT` | `(ProjectId, HashSha256) unique` (SHA-256 hex `nchar(64)`), `ValidationStatus int`, JSON cols |
-| `AnalysisRuns` | `Id` | `ProjectId RESTRICT`, `EngineeringFileId→SET NULL`, `ScenarioId→SET NULL` | `(ProjectId, InputHash)` idx, `InputHash nchar(64)`, `RowVersion` |
+| `AnalysisRuns` | `Id` | `ProjectId RESTRICT`, `EngineeringFileId→SET NULL`, `ScenarioId→SET NULL` | `(ProjectId, InputHash)` idx, `InputHash nchar(64)`, `RowVersion`; `InputSnapshotJson` keys: `fileId`, `fileHash`, `geometryHash` (SHA-256 over CRS + rings), `format`, `parameters` (no persisted CRS) |
 | `AnalysisResults` | `Id` | `AnalysisRunId unique 1:1 CASCADE` | `ValuesJson` + `ClassificationSummaryJson nvarchar(max)`, `IsEstimated` |
 | `Scenarios` | `Id` | `ProjectId RESTRICT`, `ParentScenarioId self RESTRICT`, `BaseAnalysisRunId→SET NULL` | `(ProjectId, Kind)` idx, `ParametersJson nvarchar(max)`, `RowVersion` |
 | `Recommendations` | `Id` | `ProjectId RESTRICT`, `AnalysisRunId/ScenarioId/CostEstimateId→SET NULL`, `RecommendationRuleId→RESTRICT` | `EvidenceLevel int`, `Confidence nullable`, `PolygonIndex` |

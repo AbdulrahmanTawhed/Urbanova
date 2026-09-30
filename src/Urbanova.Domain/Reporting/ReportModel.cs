@@ -82,6 +82,64 @@ public sealed record ReportCostSection(
     decimal? CalculatedTotal,
     string? Currency);
 
+/// <summary>
+/// How an authorized client retrieves the analyzed geometry. Reference-only:
+/// method plus route template; the concrete file id lives on the referencing block.
+/// No host URL is stored. Retrieval requires the source file bytes to remain available.
+/// </summary>
+public sealed record ReportGeometryRetrieval(
+    string Method,
+    string RelativePath,
+    bool RequiresSourceFile);
+
+/// <summary>
+/// Reference-only spatial identity for one analyzed run. No coordinates, rings,
+/// bounding boxes, or images are embedded: a client resolves polygons through
+/// <see cref="ReportGeometryRetrieval"/> and maps report PolygonIndex values
+/// positionally from <see cref="ReportSpatialReferences.PolygonIndexBase"/>.
+/// <c>SourceEngineeringFileId</c> is the historical file identity from the run's
+/// snapshot and survives source deletion; <c>LiveEngineeringFileId</c> is the
+/// current relationship and nulls when the file row is gone. Anything not
+/// persisted stays null rather than invented.
+/// </summary>
+public sealed record ReportRunSpatialReference(
+    Guid? ScenarioId,
+    Guid AnalysisRunId,
+    Guid? SourceEngineeringFileId,
+    Guid? LiveEngineeringFileId,
+    string InputHash,
+    string? GeometryHash,
+    string? FileHash,
+    string? GeometryCrs,
+    int PolygonCount,
+    ReportGeometryRetrieval Retrieval);
+
+/// <summary>
+/// Recommendation spatial context. Under current semantics recommendations always
+/// come from the displayed analysis run, so this records that identity without
+/// duplicating the full geometry block. Present whenever the displayed analysis
+/// exists — including evaluated runs that produced zero recommendations, where
+/// <c>RecommendationCount</c> is 0 (evaluated-empty, not skipped).
+/// </summary>
+public sealed record ReportRecommendationSpatialContext(
+    Guid RecommendationAnalysisRunId,
+    bool SameAsDisplayedAnalysis,
+    int RecommendationCount);
+
+/// <summary>
+/// Additive spatial-identity block. Displayed analysis, recommendation context,
+/// and each comparison side are separate references: baseline and alternative may
+/// come from different files/geometries (comparison checks polygon counts, not
+/// identical hashes), and the displayed run may be unrelated to both.
+/// Null comparison sides mean no valid comparison was produced.
+/// </summary>
+public sealed record ReportSpatialReferences(
+    int PolygonIndexBase,
+    ReportRunSpatialReference? DisplayedAnalysis,
+    ReportRecommendationSpatialContext? RecommendationContext,
+    ReportRunSpatialReference? ComparisonBaseline,
+    ReportRunSpatialReference? ComparisonAlternative);
+
 public sealed record ReportModel(
     ReportProjectSection Project,
     ReportSiteSection? Site,
@@ -91,5 +149,6 @@ public sealed record ReportModel(
     ReportComparisonSection Comparison,
     IReadOnlyList<ReportRecommendationSection> Recommendations,
     ReportCostSection Costs,
+    ReportSpatialReferences SpatialReferences,
     IReadOnlyList<string> DecisionSummary,
     IReadOnlyList<string> Caveats);

@@ -13,25 +13,40 @@ public sealed class ReportGeneratorTests
             "{\"predictedDeltaC\":-1.05,\"targetClassification\":\"Moderate\"," +
             "\"basis\":\"HeatV01 sensitivity\"}").RootElement.Clone();
 
-    private static ReportModel Model(string projectName = "Downtown") => new(
-        new ReportProjectSection(Guid.NewGuid(), projectName, "Desc", "Active", DateTimeOffset.UtcNow),
-        new ReportSiteSection("Main St", 52.5, 13.4, "EPSG:4326", 1500),
-        new ReportAnalysisSection(new ReportSectionStatus("Available", null),
-            Guid.NewGuid(), "HeatV01", "0.1.0-mvp", "mvp-001",
-            "LandSurfaceTempProxy", "Celsius", true,
-            [new ReportAreaValue(0, 4, 32, "Moderate")],
-            new Dictionary<string, int> { ["moderate"] = 1 }),
-        [new ReportProblemArea(0, 36, 4, "Plant trees")],
-        [new ReportScenarioSection(Guid.NewGuid(), "Baseline", "B", true, 1,
-            new Dictionary<string, double>(), Guid.NewGuid(), 32, "Moderate")],
-        new ReportComparisonSection(new ReportSectionStatus("Available", null),
-            Guid.NewGuid(), Guid.NewGuid(), -4.5, 1, 0, -40m, "USD"),
-        [new ReportRecommendationSection(0, "Hot", "Low vegetation", "Plant", Impact(),
-            "HEAT-VEG-001", "HeatV01 sensitivities", "Calculated",
-            ["MVP placeholder reference — pending engineering validation"],
-            "High", null, "Unavailable", null)],
-        new ReportCostSection(1, 0, "Calculated", null, 100m, "USD"),
-        ["Mean improved."], ["MVP estimates only."]);
+    private static ReportModel Model(string projectName = "Downtown")
+    {
+        var runId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
+        ReportRunSpatialReference SideRef(char hash, Guid fid) => new(
+            Guid.NewGuid(), Guid.NewGuid(), fid, fid,
+            new string(hash, 64), new string(hash, 64), new string(hash, 64), null, 1,
+            new ReportGeometryRetrieval("POST", "/api/files/{fileId}/extract-geometry", true));
+        return new(
+            new ReportProjectSection(Guid.NewGuid(), projectName, "Desc", "Active", DateTimeOffset.UtcNow),
+            new ReportSiteSection("Main St", 52.5, 13.4, "EPSG:4326", 1500),
+            new ReportAnalysisSection(new ReportSectionStatus("Available", null),
+                runId, "HeatV01", "0.1.0-mvp", "mvp-001",
+                "LandSurfaceTempProxy", "Celsius", true,
+                [new ReportAreaValue(0, 4, 32, "Moderate")],
+                new Dictionary<string, int> { ["moderate"] = 1 }),
+            [new ReportProblemArea(0, 36, 4, "Plant trees")],
+            [new ReportScenarioSection(Guid.NewGuid(), "Baseline", "B", true, 1,
+                new Dictionary<string, double>(), Guid.NewGuid(), 32, "Moderate")],
+            new ReportComparisonSection(new ReportSectionStatus("Available", null),
+                Guid.NewGuid(), Guid.NewGuid(), -4.5, 1, 0, -40m, "USD"),
+            [new ReportRecommendationSection(0, "Hot", "Low vegetation", "Plant", Impact(),
+                "HEAT-VEG-001", "HeatV01 sensitivities", "Calculated",
+                ["MVP placeholder reference — pending engineering validation"],
+                "High", null, "Unavailable", null)],
+            new ReportCostSection(1, 0, "Calculated", null, 100m, "USD"),
+            new ReportSpatialReferences(0,
+                new ReportRunSpatialReference(null, runId, fileId, fileId,
+                    new string('a', 64), new string('b', 64), new string('c', 64), null, 1,
+                    new ReportGeometryRetrieval("POST", "/api/files/{fileId}/extract-geometry", true)),
+                new ReportRecommendationSpatialContext(runId, true, 1),
+                SideRef('d', Guid.NewGuid()), SideRef('e', Guid.NewGuid())),
+            ["Mean improved."], ["MVP estimates only."]);
+    }
 
     [Fact]
     public async Task Json_IsCanonical_AndComplete()
@@ -288,5 +303,125 @@ public sealed class ReportGeneratorTests
         var html = await new HtmlReportGenerator().GenerateAsync(model);
         html.Content.Should().Contain("Estimates exist but none have reliable prices.")
             .And.NotContain("total 0 USD");
+    }
+
+    [Fact]
+    public async Task Json_ExposesSpatialReferences_ReferenceOnly()
+    {
+        var rendered = await new JsonReportGenerator().GenerateAsync(Model());
+        using var doc = JsonDocument.Parse(rendered.Content);
+        var refs = doc.RootElement.GetProperty("spatialReferences");
+
+        refs.GetProperty("polygonIndexBase").GetInt32().Should().Be(0);
+
+        var displayed = refs.GetProperty("displayedAnalysis");
+        displayed.GetProperty("analysisRunId").GetString().Should().NotBeNullOrWhiteSpace();
+        displayed.GetProperty("analysisRunId").GetString().Should().Be(
+            doc.RootElement.GetProperty("analysis").GetProperty("runId").GetString(),
+            "displayed analysis must freeze the exact run shown");
+        displayed.GetProperty("sourceEngineeringFileId").GetString().Should().Be(
+            displayed.GetProperty("liveEngineeringFileId").GetString(),
+            "source and live file identity match while the source remains available");
+        displayed.GetProperty("inputHash").GetString().Should().HaveLength(64);
+        displayed.GetProperty("geometryHash").GetString().Should().HaveLength(64);
+        displayed.GetProperty("fileHash").GetString().Should().HaveLength(64);
+        displayed.GetProperty("geometryCrs").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("polygonCount").GetInt32().Should().Be(1);
+        var retrieval = displayed.GetProperty("retrieval");
+        retrieval.GetProperty("method").GetString().Should().Be("POST");
+        retrieval.GetProperty("relativePath").GetString().Should().StartWith("/api/")
+            .And.Contain("extract-geometry");
+        retrieval.GetProperty("requiresSourceFile").GetBoolean().Should().BeTrue();
+
+        var recCtx = refs.GetProperty("recommendationContext");
+        recCtx.GetProperty("recommendationAnalysisRunId").GetString().Should().Be(
+            displayed.GetProperty("analysisRunId").GetString());
+        recCtx.GetProperty("sameAsDisplayedAnalysis").GetBoolean().Should().BeTrue();
+        recCtx.GetProperty("recommendationCount").GetInt32().Should().Be(1);
+
+        var baseline = refs.GetProperty("comparisonBaseline");
+        var alternative = refs.GetProperty("comparisonAlternative");
+        baseline.GetProperty("scenarioId").GetString().Should().NotBe(
+            alternative.GetProperty("scenarioId").GetString());
+        baseline.GetProperty("analysisRunId").GetString().Should().NotBe(
+            alternative.GetProperty("analysisRunId").GetString());
+
+        refs.ToString().Should().NotContain("rings").And.NotContain("coordinates");
+    }
+
+    [Fact]
+    public async Task Json_NullComparisonReferences_SerializeHonestly()
+    {
+        var model = Model() with
+        {
+            SpatialReferences = Model().SpatialReferences with
+            {
+                ComparisonBaseline = null,
+                ComparisonAlternative = null,
+            },
+        };
+
+        var rendered = await new JsonReportGenerator().GenerateAsync(model);
+        using var doc = JsonDocument.Parse(rendered.Content);
+        var refs = doc.RootElement.GetProperty("spatialReferences");
+
+        refs.GetProperty("comparisonBaseline").ValueKind.Should().Be(JsonValueKind.Null);
+        refs.GetProperty("comparisonAlternative").ValueKind.Should().Be(JsonValueKind.Null);
+        refs.GetProperty("displayedAnalysis").ValueKind.Should().NotBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Html_RendersSpatialReferences_TextOnly()
+    {
+        var rendered = await new HtmlReportGenerator().GenerateAsync(Model());
+
+        rendered.Content.Should().Contain("Spatial references")
+            .And.Contain("Polygon index base: 0")
+            .And.Contain("source file")
+            .And.Contain("live file")
+            .And.Contain("extract-geometry")
+            .And.Contain("while the source file remains available")
+            .And.NotContain("rings")
+            .And.NotContain("GeoJSON")
+            .And.NotContain("<svg")
+            .And.NotContain("canvas")
+            .And.NotContain("coordinates")
+            .And.NotContain("winner")
+            .And.NotContain("best scenario");
+    }
+
+    [Fact]
+    public async Task Html_NullReferences_RenderHonestly_NoMapClaim()
+    {
+        var model = Model() with
+        {
+            SpatialReferences = new ReportSpatialReferences(0, null, null, null, null),
+        };
+
+        var rendered = await new HtmlReportGenerator().GenerateAsync(model);
+
+        rendered.Content.Should().Contain("No succeeded analysis in this report.")
+            .And.Contain("No valid comparison in this report.")
+            .And.Contain("No succeeded analysis context for recommendations in this report.")
+            .And.NotContain("null");
+    }
+
+    [Fact]
+    public async Task Html_ZeroRecommendations_RendersEvaluatedEmpty()
+    {
+        var baseline = Model();
+        var runId = baseline.SpatialReferences.DisplayedAnalysis!.AnalysisRunId;
+        var model = baseline with
+        {
+            SpatialReferences = baseline.SpatialReferences with
+            {
+                RecommendationContext = new ReportRecommendationSpatialContext(runId, true, 0),
+            },
+        };
+
+        var rendered = await new HtmlReportGenerator().GenerateAsync(model);
+
+        rendered.Content.Should().Contain("zero recommendations produced")
+            .And.NotContain("No succeeded analysis context");
     }
 }

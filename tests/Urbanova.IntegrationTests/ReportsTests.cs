@@ -10,12 +10,15 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Urbanova.Application.Analysis;
 using Urbanova.Application.Auth;
+using Urbanova.Application.Comparison;
 using Urbanova.Application.Costing;
 using Urbanova.Application.EngineeringFiles;
 using Urbanova.Application.Projects;
 using Urbanova.Application.Recommendations;
 using Urbanova.Application.Reporting;
 using Urbanova.Application.Scenarios;
+using Urbanova.Domain;
+using Urbanova.Domain.Entities;
 using Urbanova.Infrastructure.Persistence;
 
 namespace Urbanova.IntegrationTests;
@@ -528,5 +531,278 @@ public sealed class ReportsTests : IAsyncLifetime
         (await bob.GetAsync($"/api/reports/{report.Id}/file")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.GetAsync($"/api/reports/{Guid.NewGuid()}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await _anon.GetAsync($"/api/reports/{report.Id}")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    private async Task<(HttpClient Client, Guid ProjectId, Guid FileId, Guid DisplayedRunId,
+        Guid BaselineId, Guid AlternativeId, Guid BaselineRunId, Guid AlternativeRunId)>
+        SetupSpatialDivergenceAsync()
+    {
+        // Displayed project-latest run (run3) is deliberately newer than both
+        // comparison pair runs: the report must attribute each section correctly.
+        var reg = await _anon.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest($"rp-{Guid.NewGuid():N}@example.com", "Str0ng!Pass1", null));
+        var auth = (await reg.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("SpatialCtx", null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{project.Id}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+
+        var an1 = await client.PostAsJsonAsync($"/api/projects/{project.Id}/analysis",
+            new AnalyzeRequest(file.Id, [])); // 32°C → Moderate
+        an1.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var run1 = (await an1.Content.ReadFromJsonAsync<AnalysisRunResponse>())!;
+        var bl = await client.PostAsJsonAsync($"/api/projects/{project.Id}/scenarios",
+            new CreateScenarioRequest("Baseline", run1.RunId, null, null));
+        var baseline = (await bl.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+        var al = await client.PostAsJsonAsync($"/api/projects/{project.Id}/scenarios",
+            new CreateScenarioRequest("Green", null, baseline.Id, new() { ["albedo"] = 0.0 }));
+        var alternative = (await al.Content.ReadFromJsonAsync<ScenarioResponse>())!;
+        await client.PostAsJsonAsync($"/api/scenarios/{alternative.Id}/analyze", new AnalyzeScenarioRequest(null));
+
+        var an3 = await client.PostAsJsonAsync($"/api/projects/{project.Id}/analysis",
+            new AnalyzeRequest(file.Id, new() { ["vegetationCoverPct"] = 40.0 })); // 30°C → Moderate, latest
+        an3.StatusCode.Should().Be(HttpStatusCode.Created);
+        var run3 = (await an3.Content.ReadFromJsonAsync<AnalysisRunResponse>())!;
+
+        var cmp = await client.GetFromJsonAsync<ComparisonResponse>(
+            $"/api/projects/{project.Id}/comparison?baselineId={baseline.Id}&alternativeId={alternative.Id}");
+        return (client, project.Id, file.Id, run3.RunId,
+            baseline.Id, alternative.Id, cmp!.Baseline.RunId, cmp.Alternative.RunId);
+    }
+
+    [Fact]
+    public async Task GenerateJson_SpatialReferences_FreezeExactContexts()
+    {
+        var (client, projectId, fileId, displayedRunId,
+            baselineId, alternativeId, baselineRunId, alternativeRunId) =
+            await SetupSpatialDivergenceAsync();
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", baselineId, alternativeId));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var root = doc.RootElement;
+        var refs = root.GetProperty("spatialReferences");
+        refs.GetProperty("polygonIndexBase").GetInt32().Should().Be(0);
+
+        var displayed = refs.GetProperty("displayedAnalysis");
+        displayed.GetProperty("analysisRunId").GetString().Should().Be(displayedRunId.ToString());
+        root.GetProperty("analysis").GetProperty("runId").GetString().Should().Be(displayedRunId.ToString());
+        displayed.GetProperty("sourceEngineeringFileId").GetString().Should().Be(fileId.ToString());
+        displayed.GetProperty("liveEngineeringFileId").GetString().Should().Be(fileId.ToString());
+        displayed.GetProperty("polygonCount").GetInt32().Should().Be(
+            root.GetProperty("analysis").GetProperty("values").GetArrayLength());
+        displayed.GetProperty("geometryCrs").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("retrieval").GetProperty("method").GetString().Should().Be("POST");
+        displayed.GetProperty("retrieval").GetProperty("relativePath").GetString()
+            .Should().StartWith("/api/").And.Contain("extract-geometry");
+
+        var recCtx = refs.GetProperty("recommendationContext");
+        recCtx.GetProperty("recommendationAnalysisRunId").GetString().Should().Be(displayedRunId.ToString());
+        recCtx.GetProperty("sameAsDisplayedAnalysis").GetBoolean().Should().BeTrue();
+        recCtx.GetProperty("recommendationCount").GetInt32().Should().Be(1);
+
+        var baselineRef = refs.GetProperty("comparisonBaseline");
+        baselineRef.GetProperty("scenarioId").GetString().Should().Be(baselineId.ToString());
+        baselineRef.GetProperty("analysisRunId").GetString().Should().Be(baselineRunId.ToString());
+        var alternativeRef = refs.GetProperty("comparisonAlternative");
+        alternativeRef.GetProperty("scenarioId").GetString().Should().Be(alternativeId.ToString());
+        alternativeRef.GetProperty("analysisRunId").GetString().Should().Be(alternativeRunId.ToString());
+
+        // Intentional mixed scope: displayed run differs from both pair runs, and
+        // the pair sides are not shared with each other.
+        displayed.GetProperty("analysisRunId").GetString().Should()
+            .NotBe(baselineRef.GetProperty("analysisRunId").GetString())
+            .And.NotBe(alternativeRef.GetProperty("analysisRunId").GetString());
+        baselineRef.GetProperty("analysisRunId").GetString().Should()
+            .NotBe(alternativeRef.GetProperty("analysisRunId").GetString());
+
+        // Each reference carries its run's persisted identity (hashes from the snapshot).
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var run = await db.AnalysisRuns.SingleAsync(r => r.Id == displayedRunId);
+            displayed.GetProperty("inputHash").GetString().Should().Be(run.InputHash);
+            using var snapshot = JsonDocument.Parse(run.InputSnapshotJson);
+            displayed.GetProperty("geometryHash").GetString().Should().Be(
+                snapshot.RootElement.GetProperty("geometryHash").GetString());
+            displayed.GetProperty("fileHash").GetString().Should().Be(
+                snapshot.RootElement.GetProperty("fileHash").GetString());
+        }
+
+        refs.ToString().Should().NotContain("rings").And.NotContain("coordinates");
+        root.GetProperty("project").GetProperty("name").GetString().Should().Be("SpatialCtx");
+        root.GetProperty("comparison").GetProperty("meanDelta").ValueKind.Should()
+            .NotBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GenerateJson_NoComparison_NullSpatialComparisonRefs()
+    {
+        var (client, projectId, _, displayedRunId, _, _, _, _) = await SetupSpatialDivergenceAsync();
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{projectId}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var refs = doc.RootElement.GetProperty("spatialReferences");
+
+        refs.GetProperty("displayedAnalysis").GetProperty("analysisRunId").GetString()
+            .Should().Be(displayedRunId.ToString());
+        refs.GetProperty("recommendationContext").GetProperty("sameAsDisplayedAnalysis")
+            .GetBoolean().Should().BeTrue();
+        refs.GetProperty("comparisonBaseline").ValueKind.Should().Be(JsonValueKind.Null);
+        refs.GetProperty("comparisonAlternative").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GenerateJson_SourceDeleted_PreservesHistoricalIdentity()
+    {
+        var reg = await _anon.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest($"rp-{Guid.NewGuid():N}@example.com", "Str0ng!Pass1", null));
+        var auth = (await reg.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("SpatialGone", null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{project.Id}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        var an = await client.PostAsJsonAsync($"/api/projects/{project.Id}/analysis",
+            new AnalyzeRequest(file.Id, []));
+        var runId = (await an.Content.ReadFromJsonAsync<AnalysisRunResponse>())!.RunId;
+
+        // Delete through the real API: the run survives with a nulled FK (SET NULL).
+        (await client.DeleteAsync($"/api/files/{file.Id}")).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.AnalysisRuns.SingleAsync(r => r.Id == runId)).EngineeringFileId.Should().BeNull();
+        }
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{project.Id}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var displayed = doc.RootElement.GetProperty("spatialReferences").GetProperty("displayedAnalysis");
+        displayed.GetProperty("sourceEngineeringFileId").GetString().Should().Be(file.Id.ToString(),
+            "historical snapshot identity survives source deletion");
+        displayed.GetProperty("liveEngineeringFileId").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("inputHash").GetString().Should().NotBeNullOrWhiteSpace();
+        displayed.GetProperty("geometryHash").GetString().Should().NotBeNullOrWhiteSpace();
+        displayed.GetProperty("fileHash").GetString().Should().NotBeNullOrWhiteSpace();
+        displayed.GetProperty("polygonCount").GetInt32().Should().Be(
+            doc.RootElement.GetProperty("analysis").GetProperty("values").GetArrayLength());
+        displayed.GetProperty("retrieval").GetProperty("requiresSourceFile")
+            .GetBoolean().Should().BeTrue();
+        doc.RootElement.GetProperty("analysis").GetProperty("values").GetArrayLength()
+            .Should().BeGreaterThan(0, "stored numeric content stays readable");
+    }
+
+    [Fact]
+    public async Task GenerateJson_EvaluatedEmpty_KeepsRecommendationContext()
+    {
+        var reg = await _anon.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest($"rp-{Guid.NewGuid():N}@example.com", "Str0ng!Pass1", null));
+        var auth = (await reg.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("SpatialEmpty", null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent(Encoding.UTF8.GetBytes(SquareGeoJson)), "file", "g.geojson" },
+        };
+        var up = await client.PostAsync($"/api/projects/{project.Id}/files", form);
+        var file = (await up.Content.ReadFromJsonAsync<FileResponse>())!;
+        var an = await client.PostAsJsonAsync($"/api/projects/{project.Id}/analysis",
+            new AnalyzeRequest(file.Id, new() { ["vegetationCoverPct"] = 100.0 })); // 27°C → Acceptable
+        var runId = (await an.Content.ReadFromJsonAsync<AnalysisRunResponse>())!.RunId;
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{project.Id}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var refs = doc.RootElement.GetProperty("spatialReferences");
+        refs.GetProperty("displayedAnalysis").GetProperty("analysisRunId").GetString()
+            .Should().Be(runId.ToString());
+
+        var recCtx = refs.GetProperty("recommendationContext");
+        recCtx.ValueKind.Should().NotBe(JsonValueKind.Null,
+            "an evaluated run keeps context even with zero rows");
+        recCtx.GetProperty("recommendationAnalysisRunId").GetString().Should().Be(runId.ToString());
+        recCtx.GetProperty("sameAsDisplayedAnalysis").GetBoolean().Should().BeTrue();
+        recCtx.GetProperty("recommendationCount").GetInt32().Should().Be(0);
+        doc.RootElement.GetProperty("recommendations").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GenerateJson_MalformedSnapshot_StaysHonestWithoutCrash()
+    {
+        var reg = await _anon.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest($"rp-{Guid.NewGuid():N}@example.com", "Str0ng!Pass1", null));
+        var auth = (await reg.Content.ReadFromJsonAsync<AuthResponse>())!;
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+
+        var pr = await client.PostAsJsonAsync("/api/projects", new CreateProjectRequest("SpatialBroken", null, null));
+        var project = (await pr.Content.ReadFromJsonAsync<ProjectResponse>())!;
+
+        // Seeded legacy-style row: valid result, unparseable snapshot (established
+        // direct-seeding pattern; fresh per-test database).
+        Guid runId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var run = new AnalysisRun
+            {
+                ProjectId = project.Id,
+                EngineName = "HeatV01", EngineVersion = "0.1.0-mvp", ConfigVersion = "mvp-001",
+                ConfigSnapshotJson = "{}", InputSnapshotJson = "not-json",
+                InputHash = new string('e', 64), Status = AnalysisStatus.Succeeded,
+                StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+                Result = new AnalysisResult
+                {
+                    Metric = "LandSurfaceTempProxy", Unit = "Celsius", IsEstimated = true,
+                    ValuesJson = """[{"polygonIndex":0,"area":4,"value":32,"classification":"Moderate"}]""",
+                    ClassificationSummaryJson = """{"acceptable":0,"moderate":1,"problemArea":0}""",
+                },
+            };
+            db.AnalysisRuns.Add(run);
+            await db.SaveChangesAsync();
+            runId = run.Id;
+        }
+
+        var res = await client.PostAsJsonAsync($"/api/projects/{project.Id}/reports",
+            new CreateReportRequest("Json", null, null));
+        res.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        using var doc = JsonDocument.Parse((await res.Content.ReadFromJsonAsync<ReportResponse>())!.Content!);
+        var displayed = doc.RootElement.GetProperty("spatialReferences").GetProperty("displayedAnalysis");
+        displayed.GetProperty("analysisRunId").GetString().Should().Be(runId.ToString());
+        displayed.GetProperty("sourceEngineeringFileId").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("geometryHash").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("fileHash").ValueKind.Should().Be(JsonValueKind.Null);
+        displayed.GetProperty("inputHash").GetString().Should().Be(new string('e', 64));
     }
 }
